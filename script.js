@@ -19,6 +19,20 @@ const SMOOTHING = 0.55; // higher = smoother, lower = more responsive
 
 let originalCapturedPhoto = null;
 
+let dogTransform = {
+  x: 0,
+  y: 0,
+  angle: 0,
+  scale: 1
+};
+
+let dogNoseTransform = {
+  x: 0,
+  y: 0
+};
+
+const FILTER_SMOOTHING = 0.75;
+
 // =========================
 // LIVE FILTER OVERLAY CANVAS
 // =========================
@@ -132,6 +146,25 @@ function smoothFace(oldFace, newFace) {
   };
 }
 
+function getAveragePoint(points) {
+  let x = 0;
+  let y = 0;
+
+  for (const p of points) {
+    x += p.x;
+    y += p.y;
+  }
+
+  return {
+    x: x / points.length,
+    y: y / points.length
+  };
+}
+
+function lerp(a, b, t) {
+  return a * (1 - t) + b * t;
+}
+
 // =========================
 // LIVE OVERLAY RENDER LOOP
 // =========================
@@ -146,7 +179,7 @@ function renderOverlayLoop() {
       overlayCtx.scale(-1, 1);
     }
 
-    drawDogFilter(overlayCtx, trackedFace, cameraFeed);
+    drawDogFilter(overlayCtx, trackedFace, cameraFeed, true);
 
     overlayCtx.restore();
   }
@@ -356,76 +389,124 @@ function getVisibleVideoRect() {
 // =========================
 // DRAW DOG FILTER
 // =========================
-function drawDogFilter(context, detection, videoElement) {
+function drawDogFilter(context, detection, videoElement, useSmoothing = true) {
   if (!detection) return;
 
   const canvas = context.canvas;
-  const landmarks = detection.landmarks;
+  const landmarks = detection.landmarks.positions;
 
+  // Stable anchor points
   const leftEye = mapLandmarkToCanvas(
-    landmarks.getLeftEye()[0],
+    getAveragePoint(landmarks.slice(36, 42)),
     videoElement,
     canvas
   );
 
   const rightEye = mapLandmarkToCanvas(
-    landmarks.getRightEye()[3],
+    getAveragePoint(landmarks.slice(42, 48)),
     videoElement,
     canvas
   );
 
   const nose = mapLandmarkToCanvas(
-    landmarks.getNose()[3],
+    landmarks[30], // nose tip
     videoElement,
     canvas
   );
 
+  const leftBrow = mapLandmarkToCanvas(
+    getAveragePoint(landmarks.slice(17, 22)),
+    videoElement,
+    canvas
+  );
+
+  const rightBrow = mapLandmarkToCanvas(
+    getAveragePoint(landmarks.slice(22, 27)),
+    videoElement,
+    canvas
+  );
+
+  const jawLeft = mapLandmarkToCanvas(landmarks[0], videoElement, canvas);
+  const jawRight = mapLandmarkToCanvas(landmarks[16], videoElement, canvas);
+
+  // Face geometry
   const eyeCenterX = (leftEye.x + rightEye.x) / 2;
   const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+
+  const browCenterX = (leftBrow.x + rightBrow.x) / 2;
+  const browCenterY = (leftBrow.y + rightBrow.y) / 2;
 
   const dx = rightEye.x - leftEye.x;
   const dy = rightEye.y - leftEye.y;
 
   const angle = Math.atan2(dy, dx);
-  const eyeDistance = Math.abs(dx);
 
-  const faceWidth = eyeDistance * 1.3;
+  const faceWidth = Math.abs(jawRight.x - jawLeft.x);
+  const scale = faceWidth / 220;
 
-  // EARS
-  const earsWidth = faceWidth * 1.4;
-  const earsHeight = earsWidth * 0.8;
+  // Smooth full transform
+  const finalX = useSmoothing
+  ? (dogTransform.x = lerp(dogTransform.x, eyeCenterX, 1 - FILTER_SMOOTHING))
+  : eyeCenterX;
 
-  context.save();
-  context.translate(eyeCenterX, eyeCenterY);
-  context.rotate(angle);
+const finalY = useSmoothing
+  ? (dogTransform.y = lerp(dogTransform.y, eyeCenterY, 1 - FILTER_SMOOTHING))
+  : eyeCenterY;
 
-  context.drawImage(
-    dogEars,
-    -earsWidth / 2,
-    -earsHeight - 60,
-    earsWidth,
-    earsHeight
-  );
+const finalAngle = useSmoothing
+  ? (dogTransform.angle = lerp(dogTransform.angle, angle, 1 - FILTER_SMOOTHING))
+  : angle;
 
-  context.restore();
+const finalScale = useSmoothing
+  ? (dogTransform.scale = lerp(dogTransform.scale, scale, 1 - FILTER_SMOOTHING))
+  : scale;
 
-  // NOSE
-  const noseWidth = faceWidth * 0.35;
-  const noseHeight = noseWidth * 0.75;
+  const finalNoseX = useSmoothing
+  ? (dogNoseTransform.x = lerp(dogNoseTransform.x, nose.x, 1 - FILTER_SMOOTHING))
+  : nose.x;
 
-  context.save();
-  context.translate(nose.x, nose.y);
-  context.rotate(angle);
+const finalNoseY = useSmoothing
+  ? (dogNoseTransform.y = lerp(dogNoseTransform.y, nose.y, 1 - FILTER_SMOOTHING))
+  : nose.y;
 
-  context.drawImage(
-    dogNose,
-    -noseWidth / 2,
-    -noseHeight / 2,
-    noseWidth,
-    noseHeight
-  );
+  // ===== EARS =====
+context.save();
+context.translate(dogTransform.x, dogTransform.y);
+context.rotate(dogTransform.angle);
 
-  context.restore();
+const earsWidth = 260 * dogTransform.scale;
+const earsHeight = 180 * dogTransform.scale;
+
+// place ears relative to eyebrow line instead of hardcoded lift
+const earYOffset = (browCenterY - dogTransform.y) - (55 * dogTransform.scale);
+
+context.drawImage(
+  dogEars,
+  -earsWidth / 2,
+  earYOffset - earsHeight,
+  earsWidth,
+  earsHeight
+);
+
+context.restore();
+
+  // ===== NOSE =====
+context.save();
+context.translate(finalNoseX, finalNoseY);
+context.rotate(dogTransform.angle);
+
+const noseWidth = 90 * dogTransform.scale;
+const noseHeight = 65 * dogTransform.scale;
+
+context.drawImage(
+  dogNose,
+  -noseWidth / 2,
+  -noseHeight / 2,
+  noseWidth,
+  noseHeight
+);
+
+context.restore();
 }
 
 function getVideoDisplayRect() {
@@ -470,7 +551,7 @@ function takePhoto() {
   context.drawImage(cameraFeed, 0, 0, width, height);
 
   if (dogFilterEnabled && trackedFace) {
-    drawDogFilter(context, trackedFace, cameraFeed);
+    drawDogFilter(context, trackedFace, cameraFeed, false);
   }
 
   context.restore();

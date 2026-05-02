@@ -117,7 +117,7 @@ function capturePhotoToDataURL() {
     const face = getCurrentFace();
 
     if (face) {
-      drawDogFilter(context, face, cameraFeed);
+      drawDogFilter(context, face, cameraFeed, false);
     }
     console.log("Strip face:", trackedFace);
   }
