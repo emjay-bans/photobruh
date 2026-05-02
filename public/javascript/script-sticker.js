@@ -15,10 +15,10 @@ const stickerAssets = {
   waitImGoated: new Image()
 };
 
-stickerAssets.parentalAdv.src = "../public/assets/stickers/parentalAdv.png";
-stickerAssets.sunglasses.src = "../public/assets/stickers/sunglasses.png";
-stickerAssets.swag.src = "../public/assets/stickers/swag.png";
-stickerAssets.waitImGoated.src = "../public/assets/stickers/waitImGoated.png";
+stickerAssets.parentalAdv.src = "/public/assets/stickers/parentalAdv.png";
+stickerAssets.sunglasses.src = "/public/assets/stickers/sunglasses.png";
+stickerAssets.swag.src = "/public/assets/stickers/swag.png";
+stickerAssets.waitImGoated.src = "/public/assets/stickers/waitImGoated.png";
 
 function addSticker(type) {
   const img = stickerAssets[type];
