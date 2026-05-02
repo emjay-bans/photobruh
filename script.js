@@ -37,8 +37,8 @@ const overlayCtx = overlayCanvas.getContext("2d");
 const dogEars = new Image();
 const dogNose = new Image();
 
-dogEars.src = "/public/assets/filters/dogEars.png";
-dogNose.src = "/public/assets/filters/dogNose.png";
+dogEars.src = "public/assets/filters/dogEars.png";
+dogNose.src = "public/assets/filters/dogNose.png";
 
 // =========================
 // CAMERA STARTUP

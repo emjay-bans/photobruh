@@ -5,6 +5,7 @@
     <head>
         <title>PhotoBruh</title>
         <link rel="stylesheet" href="style.css">
+        <link rel="icon" href="public/assets/favicon.png">
         <script defer src="https://cdn.jsdelivr.net/npm/face-api.js/dist/face-api.min.js"></script>
     </head>
 
@@ -79,7 +80,7 @@
         <div id="editorContainer" width="1280" height="720" style="padding:10px;background-color: #bdbdbd;display: block;">
             <div style="width:98%;background-color: #008081;border:inset 3px #00a8a8;color:white;padding:5px 10px;"><b>Photo Editor</b></div>
             <p style="margin-top: 10px;margin-bottom: 5px;"><u>F</u>ile   <u>E</u>dit   <u>V</u>iew   <u>I</u>mage   <u>O</u>ptions   <u>H</u>elp</p>
-            <img id="placeholder" src="/public/assets/transparent-background.png" width="1140" height="641.25" style="position:absolute;z-index: 1;">
+            <img id="placeholder" src="public/assets/transparent-background.png" width="1140" height="641.25" style="position:absolute;z-index: 1;">
             <canvas id="editorCanvas" width="1140" height="641.25" style="z-index:20;"></canvas>
             <div style="margin-top: 10px;">
                 <button onclick="addSticker('parentalAdv')">Parental Advise</button>
@@ -93,6 +94,6 @@
     </body>
     
     <script defer src="script.js"></script>
-    <script defer src="/public/javascript/script-sticker.js"></script>
-    <script defer src="/public/javascript/script-boothStrip.js"></script>
+    <script defer src="public/javascript/script-sticker.js"></script>
+    <script defer src="public/javascript/script-boothStrip.js"></script>
 </html>
