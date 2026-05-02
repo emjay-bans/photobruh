@@ -471,19 +471,22 @@ const finalNoseY = useSmoothing
 
   // ===== EARS =====
 context.save();
-context.translate(dogTransform.x, dogTransform.y);
-context.rotate(dogTransform.angle);
+context.translate(finalX, finalY);
+context.rotate(finalAngle);
 
-const earsWidth = 260 * dogTransform.scale;
-const earsHeight = 180 * dogTransform.scale;
+const earsWidth = 260 * finalScale;
+const earsHeight = 180 * finalScale;
 
 // place ears relative to eyebrow line instead of hardcoded lift
-const earYOffset = (browCenterY - dogTransform.y) - (55 * dogTransform.scale);
+const browOffsetY = browCenterY - eyeCenterY;
+
+  // one clean vertical offset for ears
+  const earsY = browOffsetY - (195 * finalScale);
 
 context.drawImage(
   dogEars,
   -earsWidth / 2,
-  earYOffset - earsHeight,
+  earsY,
   earsWidth,
   earsHeight
 );
@@ -492,16 +495,20 @@ context.restore();
 
   // ===== NOSE =====
 context.save();
-context.translate(finalNoseX, finalNoseY);
-context.rotate(dogTransform.angle);
+context.translate(finalX, finalY);
+context.rotate(finalAngle);
 
-const noseWidth = 90 * dogTransform.scale;
-const noseHeight = 65 * dogTransform.scale;
+// nose offset relative to face center (LOCAL face space)
+const noseOffsetX = nose.x - eyeCenterX;
+const noseOffsetY = nose.y - eyeCenterY;
+
+const noseWidth = 90 * finalScale;
+const noseHeight = 65 * finalScale;
 
 context.drawImage(
   dogNose,
-  -noseWidth / 2,
-  -noseHeight / 2,
+  noseOffsetX - noseWidth / 2,
+  noseOffsetY - noseHeight / 2,
   noseWidth,
   noseHeight
 );
