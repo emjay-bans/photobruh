@@ -146,7 +146,7 @@ function renderOverlayLoop() {
       overlayCtx.scale(-1, 1);
     }
 
-    drawDogFilter(overlayCtx, trackedFace);
+    drawDogFilter(overlayCtx, trackedFace, cameraFeed);
 
     overlayCtx.restore();
   }
@@ -356,68 +356,42 @@ function getVisibleVideoRect() {
 // =========================
 // DRAW DOG FILTER
 // =========================
-function drawDogFilter(context, detection, captureMode = false) {
+function drawDogFilter(context, detection, videoElement) {
   if (!detection) return;
 
+  const canvas = context.canvas;
   const landmarks = detection.landmarks;
 
-  const leftEye = landmarks.getLeftEye()[0];
-  const rightEye = landmarks.getRightEye()[3];
-  const noseTip = landmarks.getNose()[3];
+  const leftEye = mapLandmarkToCanvas(
+    landmarks.getLeftEye()[0],
+    videoElement,
+    canvas
+  );
 
-  let leftEyeX, leftEyeY, rightEyeX, rightEyeY, noseX, noseY;
+  const rightEye = mapLandmarkToCanvas(
+    landmarks.getRightEye()[3],
+    videoElement,
+    canvas
+  );
 
-  if (captureMode) {
-  // RAW VIDEO → FULL CAPTURE CANVAS
-    const scaleX = context.canvas.width / cameraFeed.videoWidth;
-    const scaleY = context.canvas.height / cameraFeed.videoHeight;
+  const nose = mapLandmarkToCanvas(
+    landmarks.getNose()[3],
+    videoElement,
+    canvas
+  );
 
-    leftEyeX = leftEye.x * scaleX;
-    leftEyeY = leftEye.y * scaleY;
+  const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+  const eyeCenterY = (leftEye.y + rightEye.y) / 2;
 
-    rightEyeX = rightEye.x * scaleX;
-    rightEyeY = rightEye.y * scaleY;
-
-    noseX = noseTip.x * scaleX;
-    noseY = noseTip.y * scaleY;
-  } else {
-  // RAW VIDEO → VISIBLE DISPLAY RECT
-    const { offsetX, offsetY, drawW, drawH, displayW, displayH } = getVisibleVideoRect();
-
-    const lx = (leftEye.x - offsetX) / drawW;
-    const ly = (leftEye.y - offsetY) / drawH;
-
-    const rx = (rightEye.x - offsetX) / drawW;
-    const ry = (rightEye.y - offsetY) / drawH;
-
-    const nx = (noseTip.x - offsetX) / drawW;
-    const ny = (noseTip.y - offsetY) / drawH;
-
-    leftEyeX = lx * displayW;
-    leftEyeY = ly * displayH;
-
-    rightEyeX = rx * displayW;
-    rightEyeY = ry * displayH;
-
-    noseX = nx * displayW;
-    noseY = ny * displayH;
-  }
-
-  // Face center + geometry
-  const eyeCenterX = (leftEyeX + rightEyeX) / 2;
-  const eyeCenterY = (leftEyeY + rightEyeY) / 2;
-
-  const dx = rightEyeX - leftEyeX;
-  const dy = rightEyeY - leftEyeY;
+  const dx = rightEye.x - leftEye.x;
+  const dy = rightEye.y - leftEye.y;
 
   const angle = Math.atan2(dy, dx);
   const eyeDistance = Math.abs(dx);
 
   const faceWidth = eyeDistance * 1.3;
 
-  // =========================
   // EARS
-  // =========================
   const earsWidth = faceWidth * 1.4;
   const earsHeight = earsWidth * 0.8;
 
@@ -435,40 +409,21 @@ function drawDogFilter(context, detection, captureMode = false) {
 
   context.restore();
 
-  // =========================
   // NOSE
-  // =========================
   const noseWidth = faceWidth * 0.35;
   const noseHeight = noseWidth * 0.75;
 
-  const tiltIntensity = Math.min(Math.abs(angle), 0.6);
-  const noseScale = 1 + tiltIntensity * 0.25;
-
-  const scaledNoseWidth = noseWidth * noseScale;
-  const scaledNoseHeight = noseHeight * noseScale;
-
   context.save();
-  context.translate(noseX, noseY);
+  context.translate(nose.x, nose.y);
   context.rotate(angle);
 
-  if (captureMode){
-    context.drawImage(
-      dogNose,
-      -scaledNoseWidth / 2,
-      -scaledNoseHeight / 2,
-      scaledNoseWidth,
-      scaledNoseHeight
-    );
-  } else {
-    context.drawImage(
-      dogNose,
-      -scaledNoseWidth / 2,
-      -scaledNoseHeight / 2 - 48,
-      scaledNoseWidth,
-      scaledNoseHeight
-    );
-  }
-  
+  context.drawImage(
+    dogNose,
+    -noseWidth / 2,
+    -noseHeight / 2,
+    noseWidth,
+    noseHeight
+  );
 
   context.restore();
 }
@@ -515,7 +470,7 @@ function takePhoto() {
   context.drawImage(cameraFeed, 0, 0, width, height);
 
   if (dogFilterEnabled && trackedFace) {
-    drawDogFilter(context, trackedFace, true);
+    drawDogFilter(context, trackedFace, cameraFeed);
   }
 
   context.restore();

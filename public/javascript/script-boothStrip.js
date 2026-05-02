@@ -114,7 +114,12 @@ function capturePhotoToDataURL() {
   context.drawImage(cameraFeed, 0, 0, width, height);
 
   if (dogFilterEnabled && trackedFace) {
-    drawDogFilter(context, trackedFace);
+    const face = getCurrentFace();
+
+    if (face) {
+      drawDogFilter(context, face, cameraFeed);
+    }
+    console.log("Strip face:", trackedFace);
   }
 
   context.restore();
@@ -232,4 +237,18 @@ function flashCaptureEffect() {
   setTimeout(() => {
     flash.remove();
   }, 300);
+}
+
+function mapLandmarkToCanvas(point, video, canvas) {
+  const scaleX = canvas.width / video.videoWidth;
+  const scaleY = canvas.height / video.videoHeight;
+
+  return {
+    x: point.x * scaleX,
+    y: point.y * scaleY
+  };
+}
+
+function getCurrentFace() {
+  return trackedFace ? trackedFace : null;
 }
