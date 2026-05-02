@@ -1,0 +1,303 @@
+@font-face {
+    font-family: "Dos";
+    src: url('public/assets/Px437_DOS-V_re_ANK24.woff2');
+}
+
+* {
+    cursor: url("http://www.rw-designer.com/cursor-extern.php?id=111506"), auto;
+}
+a, button, .delete-btn, img {
+    cursor: url("http://www.rw-designer.com/cursor-extern.php?id=111512"), pointer;
+    font-family: 'Dos';
+}
+
+.pixel::before {
+    content: " ";
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+    z-index: 10001;
+    background-size: 100% 2px, 3px, 100%;
+    pointer-events: none;
+}
+
+body {
+    background-color: #dbdbdb;
+    display: grid;
+    place-items: center;
+    font-family: 'Dos';
+}
+
+#mainDiv{
+    border-radius: 25px;
+    box-shadow: 0px 0px 10px grey;
+    z-index: 10002;
+}
+
+#preview {
+  z-index: 2;
+  pointer-events: none;
+}
+
+#cameraFeed {
+  z-index: 1;
+}
+
+#aboveFeed{
+    background-color: #008081;
+    border-radius: 25px 25px 0 0;
+    text-align: center;
+    padding:10px 6px 6px 6px;
+    color:white;
+}
+
+#belowFeed {
+    margin-top: -5px;
+    padding:10px;
+    background-color: #008081;
+    display: flex;
+    justify-content: center;
+    border-radius: 0 0 25px 25px;
+}
+
+#snap{
+    background-color: #008081;
+    background-image: url('https://i.pinimg.com/736x/64/17/90/641790f8043f9a885ffad91a0966af8b.jpg');
+    background-size: 75%;
+    background-repeat: no-repeat;
+    background-position: center; 
+    height: 70px;
+    width: 70px;
+    border-radius: 50%;
+    border: 2px outset #059393;
+    position: relative;
+    top: 0px;
+    transition: filter 0.05s; 
+}
+
+#snap:hover{
+    filter: brightness(80%);
+}
+
+#photoStripBtn{
+    background-color: #008081;
+    background-image: url('./public/assets/photoStripIcon.png');
+    background-size: 100%;
+    background-repeat: no-repeat;
+    background-position: center; 
+    height: 70px;
+    width: 70px;
+    border-radius: 50%;
+    border: 2px outset #059393;
+    position: relative;
+    top: 0px;
+    left: 10px;
+    transition: filter 0.05s; 
+}
+
+#photoStripBtn:hover{
+    filter: brightness(80%);
+}
+
+#mirrorer{
+    margin-left: auto;
+    padding:10px;
+    border-radius: 25px;
+    font-family: 'Dos';
+    transition: filter 0.05s; 
+    border: 2px outset #059393;
+}
+
+#mirrorer:hover{
+    filter: brightness(80%);
+}
+
+#photo{
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    position:absolute;
+    top:40px;
+    display: none;
+    opacity: 1;
+    pointer-events: none;
+    transition: opacity 1s ease;
+    z-index: 3;
+    object-fit: contain;
+}
+
+#photo.fade-out {
+    opacity: 0;
+}
+
+#countdown {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    
+    width: 100px;
+    height: 100px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+
+    font-size: 3rem;
+    font-weight: bold;
+    border-radius: 50%;
+    z-index: 10;
+}
+
+#photoContainer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 20px;
+    width:75%;
+    align-items: center;
+    justify-content: center;
+}
+
+.photo-item {
+    position: relative;
+    width: 150px;
+    height: 110px;
+    overflow: hidden;
+    border-radius: 8px;
+}
+
+.saved-photo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    border: 2px solid #ccc;
+    border-radius: 8px;
+}
+
+.delete-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 6px 10px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.photo-item:hover .delete-btn {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.photo-modal {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 99999;
+    cursor: pointer;
+}
+
+.modal-image {
+    max-width: 90%;
+    max-height: 90%;
+    border-radius: 12px;
+    object-fit: contain;
+    cursor: default;
+}
+
+.close-modal {
+    position: absolute;
+    top: 20px;
+    right: 30px;
+    font-size: 3rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+#effectsList {
+    background-color: #f0f0f0;
+    padding: 20px;
+    border-radius: 8px;
+    max-width: 400px;
+    margin: 0 auto;
+    box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+#effectsList label {
+    display: block;
+    margin-top: 12px;
+    margin-bottom: 6px;
+    font-weight: bold;
+}
+
+#effectsList input[type="range"] {
+    width: 100%;
+    cursor: pointer;
+}
+
+#presetButtons {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+    gap: 8px;
+}
+
+.preset-btn {
+    padding: 10px;
+    border: 2px solid #008081;
+    background-color: #008081;
+    color: white;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: 'Dos';
+    transition: all 0.2s ease;
+}
+
+.preset-btn:hover {
+    background-color: #059393;
+    border-color: #059393;
+    filter: brightness(90%);
+}
+
+.preset-btn:active {
+    transform: scale(0.95);
+}
+
+#cameraWrapper {
+    position: relative;
+    width: 1280px;
+    height: 720px;
+}
+
+#cameraFeed {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+}
+
+#filterOverlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 2;
+    pointer-events: none;
+}
+
+#effects{
+    height:20px;
+}
+
+#editorContainer {
+    border:outset 4px #f8f8f8;
+}

@@ -1,0 +1,64 @@
+<!--COMPATIBLE WITH v0 OF script.js-->
+
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>PhotoBruh</title>
+        <link rel="stylesheet" href="style.css">
+    </head>
+
+    <body>
+        <div id="mainDiv">
+            <div id="aboveFeed"> <i><u>P</u></i>hoto<i>B</i>ruh </div>
+            <video id="cameraFeed" autoplay style="background-color:black;width:1280px;height:720px;"></video>
+            <div id="countdown"></div>
+            <br>
+            <div id="belowFeed">
+                <button id="snap"></button>
+                <button id="effects">Effects</button>
+                <button id="mirrorer">Mirror <br> Camera</button>
+            </div>
+            <canvas id="preview" style="display: none;"></canvas>
+            <img id="photo" style="width:1280px;height:720px;" alt="">
+        </div>
+        <br>
+        <div id="effectsList" style="display: none;">
+            <div id="presetButtons" style="margin-bottom: 20px;">
+                <button class="preset-btn" onclick="effectsManager.applyPreset('bw')">B&W</button>
+                <button class="preset-btn" onclick="effectsManager.applyPreset('sepia')">Sepia</button>
+                <button class="preset-btn" onclick="effectsManager.applyPreset('cool')">Cool</button>
+                <button class="preset-btn" onclick="effectsManager.applyPreset('warm')">Warm</button>
+                <button class="preset-btn" onclick="effectsManager.applyPreset('night')">Night</button>
+                <button class="preset-btn" onclick="effectsManager.applyPreset('vivid')">Vivid</button>
+                <button class="preset-btn" onclick="effectsManager.reset()">Reset</button>
+            </div>
+            <label>Grayscale</label>
+            <input type="range" id="graySlider" min="0" max="100" value="0">
+            <label>Brightness</label>
+            <input type="range" id="brightSlider" min="0" max="100" value="100">
+            <label>Blur</label>
+            <input type="range" id="blurSlider" min="0" max="100" value="0">
+            <label>Contrast</label>
+            <input type="range" id="contrastSlider" min="0" max="100" value="100">
+            <label>Hue</label>
+            <input type="range" id="hueSlider" min="0" max="100" value="0">
+            <label>Invert</label>
+            <input type="range" id="invertSlider" min="0" max="100" value="0">
+            <label>Saturation</label>
+            <input type="range" id="saturSlider" min="0" max="100" value="100">
+            <label>Sepia</label>
+            <input type="range" id="sepiaSlider" min="0" max="100" value="0">
+        </div>
+        <br> <br>
+        <h1><i>V</i>iew <i>T</i>aken <i>P</i>ictures <i>H</i>ere<i>!</i></h1>
+        <div id="photoContainer"> </div>
+        <div id="photoModal" class="photo-modal" onclick="closePhotoModal()" style="color:white;display:none;flex-direction: column;">
+            <span class="close-modal">&times;</span>
+            <img id="modalImage" class="modal-image" alt="Expanded photo">
+            <p style="clear: both;">If you want to save this photo, right-click on the picture and click 'Save image as...'!</p>
+        </div>
+    </body>
+
+    <script src="script.js"></script>
+    
+</html>
