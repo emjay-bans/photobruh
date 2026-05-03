@@ -226,6 +226,7 @@ mirrorer.addEventListener('click', () => {
 // SNAP COUNTDOWN
 // =========================
 snap.addEventListener('click', () => {
+  isBooth = false;
   let timeLeft = 3;
 
   countdown.style.display = "flex";
@@ -678,6 +679,7 @@ context.drawImage(
 
   photo.src = dataURL;
   photo.style.display = "block";
+  
   photo.style.opacity = "1";
 
   let photoList = JSON.parse(localStorage.getItem("savedCanvasImage")) || {};

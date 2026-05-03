@@ -1,3 +1,4 @@
+let isBooth;
 // =========================
 // PHOTO STRIP STATE
 // =========================
@@ -141,6 +142,7 @@ context.drawImage(
 // BUILD PHOTO STRIP
 // =========================
 function buildPhotoStrip(images) {
+  isBooth = true;
   if (!images || images.length === 0) return;
 
   const stripWidth = 600;
@@ -195,6 +197,7 @@ function buildPhotoStrip(images) {
         photo.style.display = "block";
         photo.style.opacity = "1";
         cameraFeed.style.display = "none";
+        photo.style.objectFit = "contain";
 
         setTimeout(() => {
             photo.style.display = "none";
