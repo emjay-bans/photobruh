@@ -113,14 +113,11 @@ function capturePhotoToDataURL() {
 
   context.drawImage(cameraFeed, 0, 0, width, height);
 
-  if (dogFilterEnabled && trackedFace) {
-    const face = getCurrentFace();
-
-    if (face) {
-      drawDogFilter(context, face, cameraFeed, false);
-    }
-    console.log("Strip face:", trackedFace);
-  }
+  if (activeFaceFilter && trackedFaces.length) {
+  trackedFaces.forEach((face, i) => {
+    drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
+  });
+}
 
   context.restore();
 

@@ -5,26 +5,19 @@ const effects = document.getElementById('effects');
 const canvas = document.getElementById('preview');
 const photo = document.getElementById('photo');
 const countdown = document.getElementById('countdown');
-const dogFilterBtn = document.getElementById('dogFilterBtn');
 
 let photoList = JSON.parse(localStorage.getItem("savedCanvasImage")) || {};
 
 let mirrored = false;
-let dogFilterEnabled = false;
+let activeFaceFilter = null;
 let faceModelsLoaded = false;
 
-let trackedFace = null;
-let noFaceFrames = 0;
+let trackedFaces = [];
 const SMOOTHING = 0.55; // higher = smoother, lower = more responsive
 
 let originalCapturedPhoto = null;
 
-let dogTransform = {
-  x: 0,
-  y: 0,
-  angle: 0,
-  scale: 1
-};
+let dogTransforms = [];
 
 let dogNoseTransform = {
   x: 0,
@@ -46,13 +39,29 @@ document.getElementById("cameraWrapper").appendChild(overlayCanvas);
 const overlayCtx = overlayCanvas.getContext("2d");
 
 // =========================
-// DOG FILTER ASSETS
+// FILTER ASSETS
 // =========================
-const dogEars = new Image();
-const dogNose = new Image();
+const faceFilterAssets = {
+  dog: {
+    ears: new Image(),
+    nose: new Image()
+  },
+  cat: {
+    ears: new Image(),
+    nose: new Image()
+  },
+  mustache: {
+    nose: new Image()
+  }
+};
 
-dogEars.src = "public/assets/filters/dogEars.png";
-dogNose.src = "public/assets/filters/dogNose.png";
+faceFilterAssets.dog.ears.src = "public/assets/filters/dogEars.png";
+faceFilterAssets.dog.nose.src = "public/assets/filters/dogNose.png";
+
+faceFilterAssets.cat.ears.src = "public/assets/filters/catEars.png";
+faceFilterAssets.cat.nose.src = "public/assets/filters/catNose.png";
+
+faceFilterAssets.mustache.nose.src = "public/assets/filters/mustache.png";
 
 // =========================
 // CAMERA STARTUP
@@ -94,24 +103,21 @@ async function detectFaceLoop() {
         .detectAllFaces(cameraFeed, new faceapi.TinyFaceDetectorOptions())
         .withFaceLandmarks(true);
 
-      if (detections.length > 0) {
-        const newFace = detections[0];
-
-        if (!trackedFace) {
-          trackedFace = newFace;
-        } else {
-          trackedFace = smoothFace(trackedFace, newFace);
+      trackedFaces = detections.map((face, i) => {
+        if (!dogTransforms[i]) {
+          dogTransforms[i] = {
+            x: 0,
+            y: 0,
+            angle: 0,
+            scale: 1
+          };
         }
 
-        noFaceFrames = 0;
-      } else {
-        noFaceFrames++;
+        return face;
+      });
 
-        // keep last face briefly to prevent flicker
-        if (noFaceFrames > 8) {
-          trackedFace = null;
-        }
-      }
+      // trim extra transforms if fewer faces remain
+      dogTransforms.length = trackedFaces.length;
 
     } catch (err) {
       console.error("Face detection error:", err);
@@ -171,18 +177,20 @@ function lerp(a, b, t) {
 function renderOverlayLoop() {
   overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-  if (dogFilterEnabled && trackedFace) {
-    overlayCtx.save();
+  if (activeFaceFilter && trackedFaces.length) {
+  overlayCtx.save();
 
-    if (mirrored) {
-      overlayCtx.translate(overlayCanvas.width, 0);
-      overlayCtx.scale(-1, 1);
-    }
-
-    drawDogFilter(overlayCtx, trackedFace, cameraFeed, true);
-
-    overlayCtx.restore();
+  if (mirrored) {
+    overlayCtx.translate(overlayCanvas.width, 0);
+    overlayCtx.scale(-1, 1);
   }
+
+  trackedFaces.forEach((face, i) => {
+    drawFaceFilter(overlayCtx, face, cameraFeed, dogTransforms[i], activeFaceFilter, true);
+  });
+
+  overlayCtx.restore();
+}
 
   requestAnimationFrame(renderOverlayLoop);
 }
@@ -221,11 +229,14 @@ snap.addEventListener('click', () => {
 });
 
 // =========================
-// DOG FILTER TOGGLE
+// FILTER TOGGLE
 // =========================
-dogFilterBtn.addEventListener('click', () => {
-  dogFilterEnabled = !dogFilterEnabled;
-  dogFilterBtn.textContent = dogFilterEnabled ? "Dog Filter ON" : "Dog Filter";
+document.querySelectorAll(".face-filter-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const selected = btn.dataset.filter;
+    activeFaceFilter = selected === "none" ? null : selected;
+    console.log("Active filter:", activeFaceFilter);
+  });
 });
 
 // =========================
@@ -389,7 +400,12 @@ function getVisibleVideoRect() {
 // =========================
 // DRAW DOG FILTER
 // =========================
-function drawDogFilter(context, detection, videoElement, useSmoothing = true) {
+function drawFaceFilter(context, detection, videoElement, transform, filterType, useSmoothing = true) {
+  const assets = faceFilterAssets[filterType];
+if (!assets) return;
+
+const earsImg = assets.ears;
+const noseImg = assets.nose;
   if (!detection) return;
 
   const canvas = context.canvas;
@@ -446,19 +462,19 @@ function drawDogFilter(context, detection, videoElement, useSmoothing = true) {
 
   // Smooth full transform
   const finalX = useSmoothing
-  ? (dogTransform.x = lerp(dogTransform.x, eyeCenterX, 1 - FILTER_SMOOTHING))
+  ? (transform.x = lerp(transform.x, eyeCenterX, 1 - FILTER_SMOOTHING))
   : eyeCenterX;
 
 const finalY = useSmoothing
-  ? (dogTransform.y = lerp(dogTransform.y, eyeCenterY, 1 - FILTER_SMOOTHING))
+  ? (transform.y = lerp(transform.y, eyeCenterY, 1 - FILTER_SMOOTHING))
   : eyeCenterY;
 
 const finalAngle = useSmoothing
-  ? (dogTransform.angle = lerp(dogTransform.angle, angle, 1 - FILTER_SMOOTHING))
+  ? (transform.angle = lerp(transform.angle, angle, 1 - FILTER_SMOOTHING))
   : angle;
 
 const finalScale = useSmoothing
-  ? (dogTransform.scale = lerp(dogTransform.scale, scale, 1 - FILTER_SMOOTHING))
+  ? (transform.scale = lerp(transform.scale, scale, 1 - FILTER_SMOOTHING))
   : scale;
 
   const finalNoseX = useSmoothing
@@ -483,13 +499,16 @@ const browOffsetY = browCenterY - eyeCenterY;
   // one clean vertical offset for ears
   const earsY = browOffsetY - (195 * finalScale);
 
-context.drawImage(
-  dogEars,
-  -earsWidth / 2,
-  earsY,
-  earsWidth,
-  earsHeight
-);
+  if (filterType != 'mustache') {
+    context.drawImage(
+    earsImg,
+    -earsWidth / 2,
+    earsY,
+    earsWidth,
+    earsHeight
+  );
+  }
+
 
 context.restore();
 
@@ -500,13 +519,32 @@ context.rotate(finalAngle);
 
 // nose offset relative to face center (LOCAL face space)
 const noseOffsetX = nose.x - eyeCenterX;
-const noseOffsetY = nose.y - eyeCenterY;
+let noseOffsetY = nose.y - eyeCenterY;
+if (filterType == 'dog') {
+  noseOffsetY = nose.y - eyeCenterY;
+} else if (filterType == 'cat') {
+  noseOffsetY = nose.y - eyeCenterY + 20;
+} else if (filterType == 'mustache') {
+  noseOffsetY = nose.y - eyeCenterY + 35;
+}
 
-const noseWidth = 90 * finalScale;
-const noseHeight = 65 * finalScale;
+let noseWidth;
+if (filterType == 'dog') {
+  noseWidth = 90 * finalScale;
+} else if (filterType == 'cat') {
+  noseWidth = 210 * finalScale;
+} else if (filterType == 'mustache') {
+  noseWidth = 200 * finalScale;
+}
+let noseHeight;
+if (filterType == 'dog' || filterType == 'mustache') {
+  noseHeight = 65 * finalScale;
+} else if (filterType == 'cat') {
+  noseHeight = 120 * finalScale;
+}
 
 context.drawImage(
-  dogNose,
+  noseImg,
   noseOffsetX - noseWidth / 2,
   noseOffsetY - noseHeight / 2,
   noseWidth,
@@ -557,9 +595,11 @@ function takePhoto() {
 
   context.drawImage(cameraFeed, 0, 0, width, height);
 
-  if (dogFilterEnabled && trackedFace) {
-    drawDogFilter(context, trackedFace, cameraFeed, false);
-  }
+  if (activeFaceFilter && trackedFaces.length) {
+  trackedFaces.forEach((face, i) => {
+    drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
+  });
+}
 
   context.restore();
 

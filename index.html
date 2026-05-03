@@ -41,7 +41,10 @@
                     <button class="preset-btn" onclick="effectsManager.applyPreset('vivid')">Vivid</button>
                     <button class="preset-btn" onclick="effectsManager.reset()">Reset</button>
                     <p></p><h3 style="margin-bottom: 0px;margin-top: 5px;">Face Filters</h3><p></p>
-                    <button id="dogFilterBtn">Dog Filter</button>
+                    <button class="face-filter-btn" data-filter="dog">Dog Filter</button>
+                    <button class="face-filter-btn" data-filter="cat">Cat Filter</button>
+                    <button class="face-filter-btn" data-filter="mustache">Mustache Filter</button>
+                    <button class="face-filter-btn" data-filter="none">Clear Filter</button>
                 </div>
                 <label>Grayscale</label>
                 <input type="range" id="graySlider" min="0" max="100" value="0">
