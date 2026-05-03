@@ -322,3 +322,51 @@ body {
 #editorContainer {
     border:outset 4px #f8f8f8;
 }
+
+#loadingScreen {
+  position: fixed;
+  inset: 0;
+  background: #008081;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  transition: opacity 0.6s ease;
+}
+
+#loadingScreen.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#loadingWindow {
+  width: 500px;
+  max-width: 90%;
+  background: #c0c0c0;
+  border: 3px outset white;
+  box-shadow: 6px 6px 0 #000;
+  font-family: monospace;
+}
+
+#loadingTitleBar {
+  background: #000080;
+  color: white;
+  padding: 8px 12px;
+  font-weight: bold;
+  font-size: 18px;
+}
+
+#loadingContent {
+  padding: 20px;
+  color: black;
+  font-size: 18px;
+  line-height: 1.8;
+}
+
+.boot-line {
+  margin: 8px 0;
+}
+
+#editorCanvas {
+  touch-action: none;
+}

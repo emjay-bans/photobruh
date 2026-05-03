@@ -10,6 +10,17 @@
     </head>
 
     <body>
+        <div id="loadingScreen">
+            <div id="loadingWindow">
+                <div id="loadingTitleBar">PhotoBruh Boot Manager</div>
+                <div id="loadingContent">
+                    <p class="boot-line" id="boot1">[ ] Initializing Camera...</p>
+                    <p class="boot-line" id="boot2">[ ] Loading Face Tracker...</p>
+                    <p class="boot-line" id="boot3">[ ] Loading Filters...</p>
+                    <p class="boot-line" id="boot4">[ ] Starting PhotoBruh...</p>
+                </div>
+            </div>
+        </div>
         <header>
             <div class="pixel"></div>
         </header>
@@ -48,6 +59,7 @@
                     <button class="face-filter-btn" data-filter="lorax">Lorax Filter</button>
                     <button class="face-filter-btn" data-filter="minion">Minion Filter</button>
                     <button class="face-filter-btn" data-filter="woah">Woah Filter</button>
+                    <button class="face-filter-btn" data-filter="shrek">Shrek Filter</button>
                     <button class="face-filter-btn" data-filter="none">Clear Filter</button>
                 </div>
                 <label>Grayscale</label>
@@ -94,6 +106,7 @@
                 <button onclick="addSticker('sunglasses')">Sunglasses</button>
                 <button onclick="addSticker('swag')">Swag</button>
                 <button onclick="addSticker('waitImGoated')">Wait, I'm Goated</button>
+                <button onclick="addText()">Add Text</button>
             </div> <br>
             <button id="downloadEditedBtn"><h3>Download Edited</h3></button>
         </div>

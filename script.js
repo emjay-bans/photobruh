@@ -15,11 +15,35 @@ let faceModelsLoaded = false;
 let trackedFaces = [];
 const SMOOTHING = 0.55; // higher = smoother, lower = more responsive
 
+let lastDetectionTime = 0;
+const DETECTION_INTERVAL = 100; // ms (10 detections/sec)
+let detectionInProgress = false;
+
 let originalCapturedPhoto = null;
 
 let dogTransforms = [];
 
 const FILTER_SMOOTHING = 0.75;
+
+// ==============
+// LOADING SCREEN
+// ==============
+const loadingScreen = document.getElementById("loadingScreen");
+
+function updateBootLine(id, text, done = false) {
+  const line = document.getElementById(id);
+  if (!line) return;
+
+  line.textContent = `${done ? "[✓]" : "[ ]"} ${text}`;
+}
+
+function hideLoadingScreen() {
+  loadingScreen.classList.add("hidden");
+
+  setTimeout(() => {
+    loadingScreen.style.display = "none";
+  }, 600);
+}
 
 // =========================
 // LIVE FILTER OVERLAY CANVAS
@@ -60,6 +84,9 @@ const faceFilterAssets = {
   },
   woah: {
     nose: new Image()
+  },
+  shrek: {
+    ears: new Image()
   }
 };
 
@@ -80,18 +107,32 @@ faceFilterAssets.minion.ears.src = "public/assets/filters/minionGlasses.png"
 
 faceFilterAssets.woah.nose.src = "public/assets/filters/woahShocked.png"
 
+faceFilterAssets.shrek.ears.src = "public/assets/filters/shrekEars.png"
+
 // =========================
-// CAMERA STARTUP
+// CAMERA AND LOADING STARTUP
 // =========================
 navigator.mediaDevices.getUserMedia({ video: true })
   .then(stream => {
+    updateBootLine("boot1", "Initializing Camera...", true);
+
     cameraFeed.srcObject = stream;
     cameraFeed.play();
-    loadFaceModels();
+
     renderOverlayLoop();
+    loadFaceModels();
   })
   .catch(error => {
     console.error('Error accessing camera:', error);
+
+    updateBootLine("boot1", "Camera access failed.");
+    updateBootLine("boot2", "Face Tracker unavailable.");
+    updateBootLine("boot3", "Filters unavailable.");
+    updateBootLine("boot4", "Startup failed.");
+
+    setTimeout(() => {
+      hideLoadingScreen();
+    }, 1500);
   });
 
 // =========================
@@ -104,8 +145,20 @@ async function loadFaceModels() {
     await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
     await faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL);
 
+    updateBootLine("boot2", "Loading Face Tracker...", true);
+    updateBootLine("boot3", "Loading Filters...", true);
+
     faceModelsLoaded = true;
     detectFaceLoop();
+
+    setTimeout(() => {
+      updateBootLine("boot4", "Starting PhotoBruh...", true);
+
+      setTimeout(() => {
+        hideLoadingScreen();
+      }, 500);
+    }, 300);
+
   } catch (err) {
     console.error("Failed to load face models:", err);
   }
@@ -114,10 +167,33 @@ async function loadFaceModels() {
 async function detectFaceLoop() {
   if (!faceModelsLoaded) return;
 
+  const now = performance.now();
+
+  // skip if detection is already running
+  if (detectionInProgress) {
+    requestAnimationFrame(detectFaceLoop);
+    return;
+  }
+
+  // skip until enough time has passed
+  if (now - lastDetectionTime < DETECTION_INTERVAL) {
+    requestAnimationFrame(detectFaceLoop);
+    return;
+  }
+
   if (cameraFeed.readyState >= 2) {
+    detectionInProgress = true;
+    lastDetectionTime = now;
+
     try {
       const detections = await faceapi
-        .detectAllFaces(cameraFeed, new faceapi.TinyFaceDetectorOptions())
+        .detectAllFaces(
+          cameraFeed,
+          new faceapi.TinyFaceDetectorOptions({
+            inputSize: 224,
+            scoreThreshold: 0.5
+          })
+        )
         .withFaceLandmarks(true);
 
       trackedFaces = detections.map((face, i) => {
@@ -135,12 +211,12 @@ async function detectFaceLoop() {
         return face;
       });
 
-      // trim extra transforms if fewer faces remain
       dogTransforms.length = trackedFaces.length;
-
     } catch (err) {
       console.error("Face detection error:", err);
     }
+
+    detectionInProgress = false;
   }
 
   requestAnimationFrame(detectFaceLoop);
@@ -511,6 +587,9 @@ if (filterType == 'minion') {
   } else if (filterType == 'rabbid') {
     earsWidth = 300 * finalScale
     earsHeight = 300 * finalScale
+  }  else if (filterType == 'shrek') {
+    earsWidth = 240 * finalScale
+    earsHeight = 200 * finalScale
   }
 
 // place ears relative to eyebrow line instead of hardcoded lift
@@ -522,6 +601,8 @@ const browOffsetY = browCenterY - eyeCenterY;
   earsY = browOffsetY - (195 * finalScale) + (100 * finalScale);
 } else if (filterType == 'rabbid') {
   earsY = browOffsetY - (195 * finalScale) - (120 * finalScale);
+} else if (filterType == 'shrek') {
+  earsY = browOffsetY - (195 * finalScale) - (50 * finalScale);
 }
 
   if (filterType != 'mustache' && filterType != 'lorax' && filterType != 'woah') {
@@ -598,7 +679,7 @@ if (filterType == 'dog' || filterType == 'mustache') {
   noseHeight = 65 * finalScale;
 }
 
-if (filterType != 'minion') {
+if (filterType != 'minion' && filterType != 'shrek') {
 context.drawImage(
   noseImg,
   noseOffsetX - noseWidth / 2,

@@ -1,4 +1,5 @@
 let isBooth;
+
 // =========================
 // PHOTO STRIP STATE
 // =========================
@@ -9,6 +10,8 @@ let photoStripImages = [];
 let latestPhotoStrip = null;
 let stripModeEnabled = false;
 let stripShotCount = 4;
+
+const stripWorker = new Worker("public/javascript/strip-worker.js");
 
 // =========================
 // PHOTO STRIP BUTTONS
@@ -145,71 +148,27 @@ function buildPhotoStrip(images) {
   isBooth = true;
   if (!images || images.length === 0) return;
 
-  const stripWidth = 600;
-  const frameHeight = 400;
-  const padding = 20;
-  const footerHeight = 80;
+  stripWorker.postMessage({ images });
 
-  const stripHeight = images.length * frameHeight + (images.length + 1) * padding + footerHeight;
+  stripWorker.onmessage = async (e) => {
+    const blob = e.data.blob;
+    const stripURL = URL.createObjectURL(blob);
 
-  stripCanvas.width = stripWidth;
-  stripCanvas.height = stripHeight;
+    latestPhotoStrip = stripURL;
 
-  stripCtx.clearRect(0, 0, stripWidth, stripHeight);
+    photo.src = stripURL;
+    photo.style.display = "block";
+    photo.style.opacity = "1";
+    cameraFeed.style.display = "none";
+    photo.style.objectFit = "contain";
 
-  // white strip background
-  stripCtx.fillStyle = "white";
-  stripCtx.fillRect(0, 0, stripWidth, stripHeight);
+    setTimeout(() => {
+      photo.style.display = "none";
+      cameraFeed.style.display = "block";
+    }, 3000);
 
-  let loaded = 0;
-  const imgObjects = [];
-
-  images.forEach((src, index) => {
-    const img = new Image();
-
-    img.onload = () => {
-      imgObjects[index] = img;
-      loaded++;
-
-      if (loaded === images.length) {
-        imgObjects.forEach((image, i) => {
-          const y = padding + i * (frameHeight + padding);
-
-          stripCtx.drawImage(
-            image,
-            padding,
-            y,
-            stripWidth - padding * 2,
-            frameHeight
-          );
-        });
-
-        // Footer text
-        stripCtx.fillStyle = "#008081";
-        stripCtx.font = "italic bold 28px Dos";
-        stripCtx.textAlign = "center";
-        stripCtx.fillText("PhotoBruh", stripWidth / 2, stripHeight - 30);
-
-        latestPhotoStrip = stripCanvas.toDataURL("image/png");
-
-        // Preview strip
-        photo.src = latestPhotoStrip;
-        photo.style.display = "block";
-        photo.style.opacity = "1";
-        cameraFeed.style.display = "none";
-        photo.style.objectFit = "contain";
-
-        setTimeout(() => {
-            photo.style.display = "none";
-            cameraFeed.style.display = "block";
-        }, 3000);
-
-        downloadStripBtn.disabled = false;
-      }
-    };
-
-    img.src = src;
-  });
+    downloadStripBtn.disabled = false;
+  };
 }
 
 // =========================
@@ -221,7 +180,10 @@ function downloadPhotoStrip() {
     return;
   }
 
-  downloadImage(latestPhotoStrip, "photobruh-strip.png");
+  const link = document.createElement("a");
+  link.href = latestPhotoStrip;
+  link.download = "photobruh-strip.png";
+  link.click();
 }
 
 // =========================
