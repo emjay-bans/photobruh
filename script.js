@@ -19,11 +19,6 @@ let originalCapturedPhoto = null;
 
 let dogTransforms = [];
 
-let dogNoseTransform = {
-  x: 0,
-  y: 0
-};
-
 const FILTER_SMOOTHING = 0.75;
 
 // =========================
@@ -52,6 +47,19 @@ const faceFilterAssets = {
   },
   mustache: {
     nose: new Image()
+  },
+  rabbid: {
+    ears: new Image(),
+    nose: new Image()
+  },
+  lorax: {
+    nose: new Image()
+  },
+  minion: {
+    ears: new Image()
+  },
+  woah: {
+    nose: new Image()
   }
 };
 
@@ -62,6 +70,15 @@ faceFilterAssets.cat.ears.src = "public/assets/filters/catEars.png";
 faceFilterAssets.cat.nose.src = "public/assets/filters/catNose.png";
 
 faceFilterAssets.mustache.nose.src = "public/assets/filters/mustache.png";
+
+faceFilterAssets.rabbid.ears.src = "public/assets/filters/rabbidEars.png";
+faceFilterAssets.rabbid.nose.src = "public/assets/filters/rabbidMouth.png";
+
+faceFilterAssets.lorax.nose.src = "public/assets/filters/lorax.png";
+
+faceFilterAssets.minion.ears.src = "public/assets/filters/minionGlasses.png"
+
+faceFilterAssets.woah.nose.src = "public/assets/filters/woahShocked.png"
 
 // =========================
 // CAMERA STARTUP
@@ -109,7 +126,9 @@ async function detectFaceLoop() {
             x: 0,
             y: 0,
             angle: 0,
-            scale: 1
+            scale: 1,
+            noseOffsetX: 0,
+            noseOffsetY: 0
           };
         }
 
@@ -477,29 +496,34 @@ const finalScale = useSmoothing
   ? (transform.scale = lerp(transform.scale, scale, 1 - FILTER_SMOOTHING))
   : scale;
 
-  const finalNoseX = useSmoothing
-  ? (dogNoseTransform.x = lerp(dogNoseTransform.x, nose.x, 1 - FILTER_SMOOTHING))
-  : nose.x;
-
-const finalNoseY = useSmoothing
-  ? (dogNoseTransform.y = lerp(dogNoseTransform.y, nose.y, 1 - FILTER_SMOOTHING))
-  : nose.y;
 
   // ===== EARS =====
 context.save();
 context.translate(finalX, finalY);
 context.rotate(finalAngle);
 
-const earsWidth = 260 * finalScale;
-const earsHeight = 180 * finalScale;
+let earsWidth = 260 * finalScale;
+let earsHeight = 180 * finalScale;
+if (filterType == 'minion') {
+    earsWidth = 216 * finalScale
+    earsHeight = 270 * finalScale
+  } else if (filterType == 'rabbid') {
+    earsWidth = 300 * finalScale
+    earsHeight = 300 * finalScale
+  }
 
 // place ears relative to eyebrow line instead of hardcoded lift
 const browOffsetY = browCenterY - eyeCenterY;
 
   // one clean vertical offset for ears
-  const earsY = browOffsetY - (195 * finalScale);
+  let earsY = browOffsetY - (195 * finalScale);
+  if (filterType == 'minion') {
+  earsY = browOffsetY - (195 * finalScale) + (100 * finalScale);
+} else if (filterType == 'rabbid') {
+  earsY = browOffsetY - (195 * finalScale) - (120 * finalScale);
+}
 
-  if (filterType != 'mustache') {
+  if (filterType != 'mustache' && filterType != 'lorax' && filterType != 'woah') {
     context.drawImage(
     earsImg,
     -earsWidth / 2,
@@ -518,15 +542,27 @@ context.translate(finalX, finalY);
 context.rotate(finalAngle);
 
 // nose offset relative to face center (LOCAL face space)
-const noseOffsetX = nose.x - eyeCenterX;
-let noseOffsetY = nose.y - eyeCenterY;
-if (filterType == 'dog') {
-  noseOffsetY = nose.y - eyeCenterY;
-} else if (filterType == 'cat') {
-  noseOffsetY = nose.y - eyeCenterY + 20;
-} else if (filterType == 'mustache') {
-  noseOffsetY = nose.y - eyeCenterY + 35;
-}
+const rawNoseOffsetX = nose.x - eyeCenterX;
+const rawNoseOffsetY = nose.y - eyeCenterY;
+
+const noseOffsetX = useSmoothing
+  ? (transform.noseOffsetX = lerp(transform.noseOffsetX, rawNoseOffsetX, 1 - FILTER_SMOOTHING))
+  : rawNoseOffsetX;
+
+let noseOffsetY = useSmoothing
+  ? (transform.noseOffsetY = lerp(transform.noseOffsetY, rawNoseOffsetY, 1 - FILTER_SMOOTHING))
+  : rawNoseOffsetY;
+
+const filterNoseYOffset = {
+  dog: 0,
+  cat: 20,
+  mustache: 35,
+  rabbid: 60,
+  lorax: -10,
+  minion: 0
+};
+
+noseOffsetY += (filterNoseYOffset[filterType] || 0) * finalScale;
 
 let noseWidth;
 if (filterType == 'dog') {
@@ -535,14 +571,33 @@ if (filterType == 'dog') {
   noseWidth = 210 * finalScale;
 } else if (filterType == 'mustache') {
   noseWidth = 200 * finalScale;
+} else if (filterType == 'rabbid') {
+  noseWidth = 200 * finalScale;
+} else if (filterType == 'lorax') {
+  noseWidth = 410 * finalScale;
+} else if (filterType == 'woah') {
+  noseWidth = 300 * finalScale;
+} else {
+  noseWidth = 90 * finalScale;
 }
+
+
 let noseHeight;
 if (filterType == 'dog' || filterType == 'mustache') {
   noseHeight = 65 * finalScale;
 } else if (filterType == 'cat') {
   noseHeight = 120 * finalScale;
+} else if (filterType == 'rabbid') {
+  noseHeight = 200 * finalScale;
+} else if (filterType == 'lorax') {
+  noseHeight = 410 * finalScale;
+} else if (filterType == 'woah') {
+  noseHeight = 300 * finalScale;
+} else {
+  noseHeight = 65 * finalScale;
 }
 
+if (filterType != 'minion') {
 context.drawImage(
   noseImg,
   noseOffsetX - noseWidth / 2,
@@ -550,6 +605,7 @@ context.drawImage(
   noseWidth,
   noseHeight
 );
+}
 
 context.restore();
 }
@@ -575,11 +631,13 @@ function takePhoto() {
   }
 
   const context = canvas.getContext('2d');
-  const width = cameraFeed.videoWidth;
-  const height = cameraFeed.videoHeight;
+  const visible = getVisibleVideoRect();
 
-  canvas.width = width;
-  canvas.height = height;
+const width = visible.drawW;
+const height = visible.drawH;
+
+canvas.width = width;
+canvas.height = height;
 
   context.clearRect(0, 0, width, height);
   context.save();
@@ -593,7 +651,18 @@ function takePhoto() {
     context.filter = effectsManager.buildFilterString();
   }
 
-  context.drawImage(cameraFeed, 0, 0, width, height);
+
+context.drawImage(
+  cameraFeed,
+  visible.offsetX,   // source x
+  visible.offsetY,   // source y
+  visible.drawW,     // source width
+  visible.drawH,     // source height
+  0,                 // destination x
+  0,                 // destination y
+  width,             // destination width
+  height             // destination height
+);
 
   if (activeFaceFilter && trackedFaces.length) {
   trackedFaces.forEach((face, i) => {
@@ -754,5 +823,6 @@ function syncOverlaySize() {
 }
 
 window.addEventListener("resize", syncOverlaySize);
+window.addEventListener("orientationchange", syncOverlaySize);
 cameraFeed.addEventListener("loadedmetadata", syncOverlaySize);
 syncOverlaySize();

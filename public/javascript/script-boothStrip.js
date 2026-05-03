@@ -93,11 +93,13 @@ function capturePhotoToDataURL() {
   }
 
   const context = canvas.getContext("2d");
-  const width = cameraFeed.videoWidth;
-  const height = cameraFeed.videoHeight;
+  const visible = getVisibleVideoRect();
 
-  canvas.width = width;
-  canvas.height = height;
+const width = visible.drawW;
+const height = visible.drawH;
+
+canvas.width = width;
+canvas.height = height;
 
   context.clearRect(0, 0, width, height);
   context.save();
@@ -111,7 +113,18 @@ function capturePhotoToDataURL() {
     context.filter = effectsManager.buildFilterString();
   }
 
-  context.drawImage(cameraFeed, 0, 0, width, height);
+
+context.drawImage(
+  cameraFeed,
+  visible.offsetX,   // source x
+  visible.offsetY,   // source y
+  visible.drawW,     // source width
+  visible.drawH,     // source height
+  0,                 // destination x
+  0,                 // destination y
+  width,             // destination width
+  height             // destination height
+);
 
   if (activeFaceFilter && trackedFaces.length) {
   trackedFaces.forEach((face, i) => {
@@ -237,12 +250,16 @@ function flashCaptureEffect() {
 }
 
 function mapLandmarkToCanvas(point, video, canvas) {
-  const scaleX = canvas.width / video.videoWidth;
-  const scaleY = canvas.height / video.videoHeight;
+  const visible = getVisibleVideoRect();
 
+  // remove cropped-away area first
+  const croppedX = point.x - visible.offsetX;
+  const croppedY = point.y - visible.offsetY;
+
+  // map only visible region into canvas space
   return {
-    x: point.x * scaleX,
-    y: point.y * scaleY
+    x: (croppedX / visible.drawW) * canvas.width,
+    y: (croppedY / visible.drawH) * canvas.height
   };
 }
 

@@ -7,28 +7,29 @@
         <link rel="stylesheet" href="style.css">
         <link rel="icon" href="public/assets/favicon.png">
         <script defer src="https://cdn.jsdelivr.net/npm/face-api.js/dist/face-api.min.js"></script>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
     </head>
 
     <body>
         <header>
             <div class="pixel"></div>
         </header>
-        <div style="display: flex;">
+        <div class="appLayout">
             <div id="mainDiv">
                 <div id="aboveFeed"> <i><u>P</u></i>hoto<i>B</i>ruh </div>
                 <div id="cameraWrapper">
-                    <video id="cameraFeed" autoplay style="background-color:black;width:1280px;height:720px;"></video>
+                    <video id="cameraFeed" autoplay></video>
                 </div>
                 <div id="countdown"></div>
                 <br>
                 <div id="belowFeed" style="display: flex;align-items: center;">
                     <button id="snap"></button>
                     <button id="photoStripBtn"></button>
-                    <button id="effects" style="position:relative;left:34%;">Effects and Filters</button>
+                    <button id="effects" style="position:relative;">Effects and Filters</button>
                     <button id="mirrorer" style="margin-right: 10px;">Mirror <br> Camera</button>
                 </div>
                 <canvas id="preview" style="display: none;"></canvas>
-                <img id="photo" style="width:1280px;height:720px;" alt="">
+                <img id="photo" alt="">
             </div>
             <div id="effectsList" style="display: none;margin-left:10px;">
                 <div id="presetButtons" style="margin-bottom: 20px;">
@@ -44,24 +45,28 @@
                     <button class="face-filter-btn" data-filter="dog">Dog Filter</button>
                     <button class="face-filter-btn" data-filter="cat">Cat Filter</button>
                     <button class="face-filter-btn" data-filter="mustache">Mustache Filter</button>
+                    <button class="face-filter-btn" data-filter="rabbid">Rabbid Filter</button>
+                    <button class="face-filter-btn" data-filter="lorax">Lorax Filter</button>
+                    <button class="face-filter-btn" data-filter="minion">Minion Filter</button>
+                    <button class="face-filter-btn" data-filter="woah">Woah Filter</button>
                     <button class="face-filter-btn" data-filter="none">Clear Filter</button>
                 </div>
                 <label>Grayscale</label>
-                <input type="range" id="graySlider" min="0" max="100" value="0" step="1">
+                0<input type="range" id="graySlider" min="0" max="100" value="0" step="1">100
                 <label>Brightness</label>
-                <input type="range" id="brightSlider" min="0" max="200" value="100" step="1">
+                0<input type="range" id="brightSlider" min="0" max="200" value="100" step="1">200
                 <label>Blur</label>
-                <input type="range" id="blurSlider" min="0" max="100" value="0" step="1">
+                0<input type="range" id="blurSlider" min="0" max="100" value="0" step="1">100
                 <label>Contrast</label>
-                <input type="range" id="contrastSlider" min="0" max="200" value="100" step="1">
+                0<input type="range" id="contrastSlider" min="0" max="200" value="100" step="1">200
                 <label>Hue</label>
-                <input type="range" id="hueSlider" min="0" max="200" value="0" step="1">
+                0<input type="range" id="hueSlider" min="0" max="200" value="0" step="1">200
                 <label>Invert</label>
-                <input type="range" id="invertSlider" min="0" max="100" value="0" step="1">
+                0<input type="range" id="invertSlider" min="0" max="100" value="0" step="1">100
                 <label>Saturation</label>
-                <input type="range" id="saturSlider" min="0" max="200" value="100" step="1">
+                0<input type="range" id="saturSlider" min="0" max="200" value="100" step="1">200
                 <label>Sepia</label>
-                <input type="range" id="sepiaSlider" min="0" max="100" value="0" step="1">
+                0<input type="range" id="sepiaSlider" min="0" max="100" value="0" step="1">100
             </div>
         </div>
         <br>
@@ -83,7 +88,7 @@
         <div id="editorContainer" width="1280" height="720" style="padding:10px;background-color: #bdbdbd;display: block;">
             <div style="width:98%;background-color: #008081;border:inset 3px #00a8a8;color:white;padding:5px 10px;"><b>Photo Editor</b></div>
             <p style="margin-top: 10px;margin-bottom: 5px;"><u>F</u>ile   <u>E</u>dit   <u>V</u>iew   <u>I</u>mage   <u>O</u>ptions   <u>H</u>elp</p>
-            <img id="placeholder" src="public/assets/transparent-background.png" width="1140" height="641.25" style="position:absolute;z-index: 1;">
+            <img id="placeholder" src="public/assets/transparent-background.jpg" style="position:absolute;z-index: 1;">
             <canvas id="editorCanvas" width="1140" height="641.25" style="z-index:20;"></canvas>
             <div style="margin-top: 10px;">
                 <button onclick="addSticker('parentalAdv')">Parental Advise</button>

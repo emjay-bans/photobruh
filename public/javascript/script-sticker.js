@@ -87,6 +87,30 @@ editorCanvas.addEventListener("mousedown", (e) => {
   }
 });
 
+editorCanvas.addEventListener("touchstart", (e) => {
+  const rect = editorCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  activeSticker = null;
+
+  for (let i = stickers.length - 1; i >= 0; i--) {
+    const s = stickers[i];
+
+    if (
+      mx >= s.x &&
+      mx <= s.x + s.width &&
+      my >= s.y &&
+      my <= s.y + s.height
+    ) {
+      activeSticker = s;
+      dragOffsetX = mx - s.x;
+      dragOffsetY = my - s.y;
+      break;
+    }
+  }
+});
+
 editorCanvas.addEventListener("mousemove", (e) => {
   if (!activeSticker) return;
 
@@ -100,7 +124,24 @@ editorCanvas.addEventListener("mousemove", (e) => {
   redrawEditorCanvas();
 });
 
+editorCanvas.addEventListener("touchmove", (e) => {
+  if (!activeSticker) return;
+
+  const rect = editorCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  activeSticker.x = mx - dragOffsetX;
+  activeSticker.y = my - dragOffsetY;
+
+  redrawEditorCanvas();
+});
+
 editorCanvas.addEventListener("mouseup", () => {
+  activeSticker = null;
+});
+
+editorCanvas.addEventListener("touchend", () => {
   activeSticker = null;
 });
 
