@@ -26,6 +26,11 @@ let originalCapturedPhoto = null;
 
 let dogTransforms = [];
 
+let activeAnimatedFilter = null;
+let animationFrameCount = 0;
+
+const animatedParticles = [];
+
 const FILTER_SMOOTHING = 0.75;
 
 // ==============
@@ -313,7 +318,32 @@ function renderOverlayLoop() {
   overlayCtx.restore();
 }
 
+  if (activeAnimatedFilter) {
+    drawAnimatedFilter(overlayCtx);
+  }
+
+  animationFrameCount++;
   requestAnimationFrame(renderOverlayLoop);
+}
+
+function drawAnimatedFilter(ctx) {
+  switch (activeAnimatedFilter) {
+    case "scanlines":
+      drawScanlines(ctx);
+      break;
+    case "sparkles":
+      drawSparkles(ctx);
+      break;
+    case "snow":
+      drawSnow(ctx);
+      break;
+    case "hearts":
+      drawHearts(ctx);
+      break;
+    case "matrix":
+      drawMatrix(ctx);
+      break;
+  }
 }
 
 // =========================
@@ -374,6 +404,16 @@ document.querySelectorAll(".face-filter-btn").forEach(btn => {
     const selected = btn.dataset.filter;
     activeFaceFilter = selected === "none" ? null : selected;
     console.log("Active filter:", activeFaceFilter);
+  });
+});
+
+document.querySelectorAll(".animated-filter-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const selected = btn.dataset.anim;
+    activeAnimatedFilter = selected === "none" ? null : selected;
+
+    resetAnimatedFilterState();
+    console.log("Animated filter:", activeAnimatedFilter);
   });
 });
 
@@ -488,6 +528,59 @@ class EffectsManager {
 const effectsManager = new EffectsManager();
 
 // =========================
+// RESET ANIMATED STATE
+// =========================
+
+function resetAnimatedFilterState() {
+  animatedParticles.length = 0;
+
+  if (activeAnimatedFilter === "sparkles") {
+    for (let i = 0; i < 40; i++) {
+      animatedParticles.push({
+        x: Math.random() * overlayCanvas.width,
+        y: Math.random() * overlayCanvas.height,
+        size: Math.random() * 4 + 1,
+        speed: Math.random() * 0.8 + 0.2,
+        alpha: Math.random()
+      });
+    }
+  }
+
+  if (activeAnimatedFilter === "snow") {
+    for (let i = 0; i < 60; i++) {
+      animatedParticles.push({
+        x: Math.random() * overlayCanvas.width,
+        y: Math.random() * overlayCanvas.height,
+        size: Math.random() * 5 + 2,
+        speed: Math.random() * 1.5 + 0.5
+      });
+    }
+  }
+
+  if (activeAnimatedFilter === "hearts") {
+    for (let i = 0; i < 25; i++) {
+      animatedParticles.push({
+        x: Math.random() * overlayCanvas.width,
+        y: overlayCanvas.height + Math.random() * 300,
+        size: Math.random() * 18 + 12,
+        speed: Math.random() * 1.2 + 0.5,
+        drift: (Math.random() - 0.5) * 1.2
+      });
+    }
+  }
+
+  if (activeAnimatedFilter === "matrix") {
+    for (let i = 0; i < 40; i++) {
+      animatedParticles.push({
+        x: i * 32,
+        y: Math.random() * -800,
+        speed: Math.random() * 4 + 3
+      });
+    }
+  }
+}
+
+// =========================
 // EFFECTS PANEL TOGGLE
 // =========================
 effects.addEventListener('click', () => {
@@ -537,7 +630,7 @@ function getVisibleVideoRect() {
 }
 
 // =========================
-// DRAW DOG FILTER
+// DRAW FACE FILTER (not animated)
 // =========================
 function drawFaceFilter(context, detection, videoElement, transform, filterType, useSmoothing = true) {
   const assets = faceFilterAssets[filterType];
@@ -747,6 +840,101 @@ function getVideoDisplayRect() {
 }
 
 // =========================
+// ADD ANIMATION EFFECTS
+// =========================
+
+function drawScanlines(ctx) {
+  ctx.save();
+  ctx.globalAlpha = 0.15;
+
+  for (let y = 0; y < overlayCanvas.height; y += 4) {
+    ctx.fillStyle = (y + animationFrameCount) % 8 === 0 ? "#000" : "#111";
+    ctx.fillRect(0, y, overlayCanvas.width, 2);
+  }
+
+  ctx.restore();
+}
+
+function drawSparkles(ctx) {
+  ctx.save();
+
+  animatedParticles.forEach(p => {
+    p.alpha += 0.03 * p.speed;
+    const glow = (Math.sin(p.alpha) + 1) / 2;
+
+    ctx.globalAlpha = glow;
+    ctx.fillStyle = "white";
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * glow, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.restore();
+}
+
+function drawSnow(ctx) {
+  ctx.save();
+  ctx.fillStyle = "white";
+
+  animatedParticles.forEach(p => {
+    p.y += p.speed;
+    if (p.y > overlayCanvas.height) {
+      p.y = -10;
+      p.x = Math.random() * overlayCanvas.width;
+    }
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.restore();
+}
+
+function drawHearts(ctx) {
+  ctx.save();
+  ctx.fillStyle = "rgba(255,80,120,0.8)";
+
+  animatedParticles.forEach(p => {
+    p.y -= p.speed;
+    p.x += p.drift;
+
+    if (p.y < -30) {
+      p.y = overlayCanvas.height + 30;
+      p.x = Math.random() * overlayCanvas.width;
+    }
+
+    ctx.font = `${p.size}px Arial`;
+    ctx.fillText("❤", p.x, p.y);
+  });
+
+  ctx.restore();
+}
+
+function drawMatrix(ctx) {
+  ctx.save();
+  ctx.fillStyle = "#00ff66";
+  ctx.font = "20px monospace";
+
+  animatedParticles.forEach(p => {
+    p.y += p.speed;
+
+    for (let i = 0; i < 20; i++) {
+      const char = String.fromCharCode(0x30A0 + Math.random() * 96);
+      ctx.globalAlpha = 1 - i / 20;
+      ctx.fillText(char, p.x, p.y - i * 22);
+    }
+
+    if (p.y > overlayCanvas.height + 400) {
+      p.y = -200;
+    }
+  });
+
+  ctx.restore();
+}
+
+// =========================
 // TAKE PHOTO
 // =========================
 function takePhoto() {
@@ -759,11 +947,11 @@ function takePhoto() {
   const context = canvas.getContext('2d');
   const visible = getVisibleVideoRect();
 
-const width = visible.drawW;
-const height = visible.drawH;
+  const width = visible.drawW;
+  const height = visible.drawH;
 
-canvas.width = width;
-canvas.height = height;
+  canvas.width = width;
+  canvas.height = height;
 
   context.clearRect(0, 0, width, height);
   context.save();
@@ -780,23 +968,27 @@ canvas.height = height;
   soundManager.play("shutter");
 
 
-context.drawImage(
-  cameraFeed,
-  visible.offsetX,   // source x
-  visible.offsetY,   // source y
-  visible.drawW,     // source width
-  visible.drawH,     // source height
-  0,                 // destination x
-  0,                 // destination y
-  width,             // destination width
-  height             // destination height
-);
+  context.drawImage(
+    cameraFeed,
+    visible.offsetX,   // source x
+    visible.offsetY,   // source y
+    visible.drawW,     // source width
+    visible.drawH,     // source height
+    0,                 // destination x
+    0,                 // destination y
+    width,             // destination width
+    height             // destination height
+  );
 
   if (activeFaceFilter && trackedFaces.length) {
-  trackedFaces.forEach((face, i) => {
-    drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
-  });
-}
+    trackedFaces.forEach((face, i) => {
+      drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
+    });
+  }
+
+  if (activeAnimatedFilter) {
+    drawAnimatedFilter(context);
+  }
 
   context.restore();
 
