@@ -8,6 +8,9 @@ const countdown = document.getElementById('countdown');
 
 let photoList = JSON.parse(localStorage.getItem("savedCanvasImage")) || {};
 
+let currentFacingMode = "user"; // "user" = front, "environment" = back
+let currentStream = null;
+
 let mirrored = false;
 let activeFaceFilter = null;
 let faceModelsLoaded = false;
@@ -112,28 +115,51 @@ faceFilterAssets.shrek.ears.src = "public/assets/filters/shrekEars.png"
 // =========================
 // CAMERA AND LOADING STARTUP
 // =========================
-navigator.mediaDevices.getUserMedia({ video: true })
-  .then(stream => {
-    updateBootLine("boot1", "Initializing Camera...", true);
+async function startCamera(facingMode = currentFacingMode) {
+  try {
+    // stop previous stream
+    if (currentStream) {
+      currentStream.getTracks().forEach(track => track.stop());
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: facingMode },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    });
+
+    currentStream = stream;
+    currentFacingMode = facingMode;
 
     cameraFeed.srcObject = stream;
-    cameraFeed.play();
+    await cameraFeed.play();
 
-    renderOverlayLoop();
-    loadFaceModels();
-  })
-  .catch(error => {
-    console.error('Error accessing camera:', error);
+    if (!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+      switchCameraBtn.style.display = "none";
+    }
 
-    updateBootLine("boot1", "Camera access failed.");
-    updateBootLine("boot2", "Face Tracker unavailable.");
-    updateBootLine("boot3", "Filters unavailable.");
-    updateBootLine("boot4", "Startup failed.");
+    if (currentFacingMode === "user") {
+      mirrored = true;
+      cameraFeed.style.transform = "scaleX(-1)";
+    } else {
+      mirrored = false;
+      cameraFeed.style.transform = "scaleX(1)";
+    }
 
-    setTimeout(() => {
-      hideLoadingScreen();
-    }, 1500);
-  });
+    syncOverlaySize();
+  } catch (error) {
+    console.error("Error accessing camera:", error);
+  }
+}
+
+(async () => {
+  await startCamera("user");
+  await loadFaceModels();
+  updateBootLine("boot1", "Initializing Camera...", true);
+  renderOverlayLoop();
+})();
 
 // =========================
 // FACE API MODEL LOADING
@@ -294,14 +320,30 @@ function renderOverlayLoop() {
 // MIRROR CAMERA
 // =========================
 mirrorer.addEventListener('click', () => {
+  soundManager.play("click");
   mirrored = !mirrored;
   cameraFeed.style.transform = mirrored ? 'scaleX(-1)' : 'scaleX(1)';
 });
 
 // =========================
+// SWITCH CAMERA
+// =========================
+const switchCameraBtn = document.getElementById("switchCameraBtn");
+
+switchCameraBtn.addEventListener("click", async () => {
+  soundManager.play("click");
+  const nextMode = currentFacingMode === "user" ? "environment" : "user";
+
+  await startCamera(nextMode);
+});
+
+
+// =========================
 // SNAP COUNTDOWN
 // =========================
 snap.addEventListener('click', () => {
+  soundManager.play("click");
+  soundManager.play("tick");
   isBooth = false;
   let timeLeft = 3;
 
@@ -449,6 +491,7 @@ const effectsManager = new EffectsManager();
 // EFFECTS PANEL TOGGLE
 // =========================
 effects.addEventListener('click', () => {
+  soundManager.play("click");
   const effectsList = document.getElementById('effectsList');
   effectsList.style.display = effectsList.style.display === 'block' ? 'none' : 'block';
 });
@@ -709,6 +752,7 @@ function getVideoDisplayRect() {
 function takePhoto() {
   if (cameraFeed.videoWidth === 0 || cameraFeed.videoHeight === 0) {
     console.error('Video not ready yet');
+    soundManager.play("error");
     return;
   }
 
@@ -732,6 +776,8 @@ canvas.height = height;
   if (effectsManager.hasActiveEffects()) {
     context.filter = effectsManager.buildFilterString();
   }
+
+  soundManager.play("shutter");
 
 
 context.drawImage(
@@ -769,6 +815,8 @@ context.drawImage(
 
   displayTakenPhotos();
 
+  updatePhotoCounter();
+
   setTimeout(() => {
     photo.classList.add("fade-out");
     photo.addEventListener("transitionend", handleFadeEnd(), { once: true });
@@ -795,29 +843,51 @@ function downloadImage(dataURL, filename) {
 function downloadOriginalPhoto() {
   if (!originalCapturedPhoto) {
     alert("No photo available to download.");
+    soundManager.play("error");
     return;
   }
 
   downloadImage(originalCapturedPhoto, "photobruh-original.png");
+  soundManager.play("success");
 }
 
 function downloadEditedPhoto() {
   if (!editorBaseImage) {
     alert("No edited photo available to download.");
+    soundManager.play("error");
     return;
   }
 
   const editedDataURL = editorCanvas.toDataURL("image/png");
   downloadImage(editedDataURL, "photobruh-edited.png");
+  soundManager.play("success");
 }
 
-document.getElementById("downloadOriginalBtn").addEventListener("click", downloadOriginalPhoto);
-document.getElementById("downloadEditedBtn").addEventListener("click", downloadEditedPhoto);
+document.getElementById("downloadOriginalBtn").addEventListener("click", () => {
+  soundManager.play("click");
+  downloadOriginalPhoto();
+});
+document.getElementById("downloadEditedBtn").addEventListener("click", () => {
+  soundManager.play("click");
+  downloadEditedPhoto();
+});
 
 function handleFadeEnd() {
   photo.classList.remove("fade-out");
   photo.style.display = "none";
   photo.style.opacity = "1";
+}
+
+// =========================
+// PHOTO COUNTER
+// =========================
+
+function updatePhotoCounter() {
+  const savedPhotos = JSON.parse(localStorage.getItem("savedCanvasImage")) || {};
+  const total = Object.keys(savedPhotos).length;
+
+  const counter = document.getElementById("photoCounter");
+  counter.textContent = `Photos Taken: ${total}`;
 }
 
 // =========================
@@ -852,6 +922,7 @@ function displayTakenPhotos() {
     deleteBtn.classList.add("delete-btn");
 
     deleteBtn.addEventListener("click", () => {
+      soundManager.play("delete");
       delete takenPhotos[key];
 
       const updatedPhotos = {};
@@ -861,6 +932,7 @@ function displayTakenPhotos() {
 
       localStorage.setItem("savedCanvasImage", JSON.stringify(updatedPhotos));
       displayTakenPhotos();
+      updatePhotoCounter();
     });
 
     wrapper.appendChild(img);
@@ -893,10 +965,33 @@ document.getElementById("modalImage").addEventListener("click", (e) => {
 });
 
 // =========================
+// THEME TOGGLE
+// =========================
+const themeBtn = document.getElementById("themeBtn");
+
+const themes = ["win95", "amber", "matrix", "vaporwave"];
+let currentTheme = 0;
+
+themeBtn.addEventListener("click", () => {
+    currentTheme = (currentTheme + 1) % themes.length;
+    const nextTheme = themes[currentTheme];
+
+    if (nextTheme === "win95") {
+        document.body.removeAttribute("data-theme");
+        themeBtn.textContent = "Theme: Win95";
+    } else {
+        document.body.setAttribute("data-theme", nextTheme);
+        themeBtn.textContent = `Theme: ${nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1)}`;
+    }
+});
+
+
+// =========================
 // INIT
 // =========================
 document.addEventListener("DOMContentLoaded", () => {
   displayTakenPhotos();
+  updatePhotoCounter();
 });
 
 function syncOverlaySize() {

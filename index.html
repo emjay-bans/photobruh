@@ -24,6 +24,7 @@
         <header>
             <div class="pixel"></div>
         </header>
+        
         <div style="display: flex;">
             <div id="mainDiv">
                 <div id="aboveFeed"> <i><u>P</u></i>hoto<i>B</i>ruh </div>
@@ -37,6 +38,7 @@
                     <button id="photoStripBtn"></button>
                     <button id="effects" style="position:relative;left:34%;">Effects and Filters</button>
                     <button id="mirrorer" style="margin-right: 10px;">Mirror <br> Camera</button>
+                    <button id="switchCameraBtn">Switch Camera</button>
                 </div>
                 <canvas id="preview" style="display: none;"></canvas>
                 <img id="photo" style="width:1280px;height:720px;" alt="">
@@ -81,10 +83,31 @@
             </div>
         </div>
         <br>
-
-        <button id="downloadOriginalBtn"><h3>Download Original <i>(the picture you just took)</i></h3></button>
-        <br> <br>
-        <button id="downloadStripBtn">Download Photo Strip</button>
+        <div id="photoCounter">Photos Taken: 0</div>
+        <br>
+        
+        <div style="display:flex;gap: 20px;">
+            <div id="downloads" style="display: block;">
+                <br>
+                <div style="margin-top: 10px;font-size: 20px;font-weight: bold;text-align: center;">Download Here!</div>
+                <br>
+                <button id="downloadOriginalBtn">Download Original <i>(the picture you just took)</i></button>
+                <br> <br>
+                <button id="downloadStripBtn">Download Photo Strip</button>
+            </div>
+            <div>
+                <br>
+                <div style="margin-top: 10px;font-size: 20px;font-weight: bold;text-align: center;">Theme the Website!</div>
+                <br>
+                <button id="muteBtn">Sound: On</button>
+                <button id="themeBtn">Theme: Win95</button>
+                <br> <br>
+                <label>Volume</label>
+                <input type="range" id="volumeSlider" min="0" max="100" value="70">
+            <br> <br>
+        </div>
+        </div>
+        
 
         <br> <br>
         <h1><i>V</i>iew <i>T</i>aken <i>P</i>ictures <i>H</i>ere<i>!</i></h1>
@@ -97,8 +120,8 @@
         </div>
         <h1>Photo Editor</h1>
         <div id="editorContainer" width="1280" height="720" style="padding:10px;background-color: #bdbdbd;display: block;">
-            <div style="width:98%;background-color: #008081;border:inset 3px #00a8a8;color:white;padding:5px 10px;"><b>Photo Editor</b></div>
-            <p style="margin-top: 10px;margin-bottom: 5px;"><u>F</u>ile   <u>E</u>dit   <u>V</u>iew   <u>I</u>mage   <u>O</u>ptions   <u>H</u>elp</p>
+            <div style="width:98%;background-color: var(--bg-panel-dark);border:inset 3px var(--accent);color:white;padding:5px 10px;"><b>Photo Editor</b></div>
+            <p style="margin-top: 10px;margin-bottom: 5px;color:black;"><u>F</u>ile   <u>E</u>dit   <u>V</u>iew   <u>I</u>mage   <u>O</u>ptions   <u>H</u>elp</p>
             <img id="placeholder" src="public/assets/transparent-background.jpg" width="1140" height="641.25" style="position:absolute;z-index: 1;">
             <canvas id="editorCanvas" width="1140" height="641.25" style="z-index:20;"></canvas>
             <div style="margin-top: 10px;">
@@ -116,4 +139,5 @@
     <script defer src="script.js"></script>
     <script defer src="public/javascript/script-sticker.js"></script>
     <script defer src="public/javascript/script-boothStrip.js"></script>
+    <script defer src="public/javascript/script-soundEffects.js"></script>
 </html>

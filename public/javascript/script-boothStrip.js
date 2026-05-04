@@ -34,18 +34,27 @@ photoStripBtn.addEventListener("click", () => {
 });
 
 // Download generated strip
-downloadStripBtn.addEventListener("click", downloadPhotoStrip);
+downloadStripBtn.addEventListener("click", () => {
+  soundManager.play("click");
+  downloadPhotoStrip();
+  soundManager.play("success");
+});
 
 // =========================
 // PHOTO STRIP CAPTURE FLOW
 // =========================
 function startPhotoStripCapture() {
   let currentShot = 0;
+  const counter = document.getElementById("photoCounter");
 
   function captureNextShot() {
+    soundManager.play("shutter");
+    counter.textContent = `Strip Shot ${currentShot + 1} / ${stripShotCount}`;
     if (currentShot >= stripShotCount) {
       stripModeEnabled = false;
       buildPhotoStrip(photoStripImages);
+      updatePhotoCounter();
+      soundManager.play("success");
       return;
     }
 
@@ -67,6 +76,7 @@ function startPhotoStripCapture() {
 // STRIP COUNTDOWN
 // =========================
 function startStripCountdown(callback) {
+  soundManager.play("tick");
   let timeLeft = 3;
 
   countdown.style.display = "flex";
@@ -93,6 +103,7 @@ function startStripCountdown(callback) {
 function capturePhotoToDataURL() {
   if (cameraFeed.videoWidth === 0 || cameraFeed.videoHeight === 0) {
     console.error("Video not ready yet");
+    soundManager.play("error");
     return null;
   }
 
@@ -177,6 +188,7 @@ function buildPhotoStrip(images) {
 function downloadPhotoStrip() {
   if (!latestPhotoStrip) {
     alert("No photo strip available to download.");
+    soundManager.play("error");
     return;
   }
 

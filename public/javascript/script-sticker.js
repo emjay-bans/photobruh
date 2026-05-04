@@ -30,15 +30,17 @@ function addSticker(type) {
   if (!img) return;
 
   editorObjects.push({
-  type: "sticker",
-  img,
-  x: editorCanvas.width / 2 - 60,
-  y: editorCanvas.height / 2 - 60,
-  width: 240,
-  height: 240,
-  rotation: 0
-});
+    type: "sticker",
+    img,
+    x: editorCanvas.width / 2 - 60,
+    y: editorCanvas.height / 2 - 60,
+    width: 240,
+    height: 240,
+    rotation: 0
+  });
 
+  soundManager.play("click");
+  
   redrawEditorCanvas();
 }
 
@@ -173,6 +175,7 @@ editorCanvas.addEventListener("mousedown", (e) => {
       my >= b.top - HANDLE_SIZE / 2 &&
       my <= b.top + HANDLE_SIZE / 2
     ) {
+      soundManager.play("delete");
       editorObjects.splice(i, 1);
       redrawEditorCanvas();
       return;
@@ -282,6 +285,7 @@ editorCanvas.addEventListener("touchstart", (e) => {
       my >= b.top - HANDLE_SIZE / 2 &&
       my <= b.top + HANDLE_SIZE / 2
     ) {
+      soundManager.play("delete");
       editorObjects.splice(i, 1);
       redrawEditorCanvas();
       return;
