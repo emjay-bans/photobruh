@@ -33,6 +33,122 @@ const animatedParticles = [];
 
 const FILTER_SMOOTHING = 0.75;
 
+// =========================
+// INDEXED DB
+// =========================
+const DB_NAME = "PhotoBruhDB";
+const DB_VERSION = 1;
+const STORE_NAME = "photos";
+
+let dbPromise = null;
+
+function initDB() {
+  if (dbPromise) return dbPromise;
+
+  dbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, {
+          keyPath: "id",
+          autoIncrement: true
+        });
+
+        store.createIndex("createdAt", "createdAt", { unique: false });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+
+  return dbPromise;
+}
+
+async function addPhotoToDB(blob, type = "photo") {
+  const db = await initDB();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+
+    const request = store.add({
+      blob,
+      type,
+      createdAt: Date.now()
+    });
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getAllPhotosFromDB() {
+  const db = await initDB();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.getAll();
+
+    request.onsuccess = () => {
+      const results = request.result.sort((a, b) => b.createdAt - a.createdAt);
+      resolve(results);
+    };
+
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function deletePhotoFromDB(id) {
+  const db = await initDB();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+
+    const request = store.delete(id);
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function countPhotosInDB() {
+  const db = await initDB();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.count();
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+// =========================
+// LOCALSTORAGE TO INDEXEDDB MIGRATION (if any)
+// =========================
+
+async function migrateLocalStorageToIndexedDB() {
+  const oldPhotos = JSON.parse(localStorage.getItem("savedCanvasImage")) || {};
+  const values = Object.values(oldPhotos);
+
+  if (!values.length) return;
+
+  for (const dataURL of values) {
+    const res = await fetch(dataURL);
+    const blob = await res.blob();
+    await addPhotoToDB(blob, "photo");
+  }
+
+  localStorage.removeItem("savedCanvasImage");
+}
+
 // ==============
 // LOADING SCREEN
 // ==============
@@ -992,22 +1108,30 @@ function takePhoto() {
 
   context.restore();
 
-  const dataURL = canvas.toDataURL('image/webp');
+  canvas.toBlob(async (blob) => {
+    if (!blob) return;
 
-  originalCapturedPhoto = dataURL;
+    const objectURL = URL.createObjectURL(blob);
 
-  photo.src = dataURL;
-  photo.style.display = "block";
-  
-  photo.style.opacity = "1";
+    originalCapturedPhoto = objectURL;
 
-  let photoList = JSON.parse(localStorage.getItem("savedCanvasImage")) || {};
-  photoList[Object.keys(photoList).length + 1] = dataURL;
-  localStorage.setItem("savedCanvasImage", JSON.stringify(photoList));
+    photo.src = objectURL;
+    photo.style.display = "block";
+    photo.style.opacity = "1";
 
-  displayTakenPhotos();
+    await addPhotoToDB(blob, "photo");
 
-  updatePhotoCounter();
+    await displayTakenPhotos();
+    await updatePhotoCounter();
+
+    editorBaseImage = new Image();
+    editorBaseImage.onload = () => {
+      editorCanvas.style.display = "block";
+      stickers = [];
+      redrawEditorCanvas();
+    };
+    editorBaseImage.src = objectURL;
+  }, "image/webp", 0.95);
 
   setTimeout(() => {
     photo.classList.add("fade-out");
@@ -1074,10 +1198,8 @@ function handleFadeEnd() {
 // PHOTO COUNTER
 // =========================
 
-function updatePhotoCounter() {
-  const savedPhotos = JSON.parse(localStorage.getItem("savedCanvasImage")) || {};
-  const total = Object.keys(savedPhotos).length;
-
+async function updatePhotoCounter() {
+  const total = await countPhotosInDB();
   const counter = document.getElementById("photoCounter");
   counter.textContent = `Photos Taken: ${total}`;
 }
@@ -1085,46 +1207,39 @@ function updatePhotoCounter() {
 // =========================
 // GALLERY
 // =========================
-function displayTakenPhotos() {
+async function displayTakenPhotos() {
   const photoContainer = document.getElementById("photoContainer");
-  const takenPhotos = JSON.parse(localStorage.getItem("savedCanvasImage")) || {};
+  const photos = await getAllPhotosFromDB();
 
   photoContainer.innerHTML = "";
 
-  const photoEntries = Object.entries(takenPhotos);
-
-  if (photoEntries.length === 0) {
+  if (!photos.length) {
     photoContainer.innerHTML = "<p>No saved photos yet.</p>";
     return;
   }
 
-  photoEntries.forEach(([key, photoSrc], index) => {
+  photos.forEach((entry, index) => {
     const wrapper = document.createElement("div");
     wrapper.classList.add("photo-item");
 
     const img = document.createElement("img");
-    img.src = photoSrc;
+    const objectURL = URL.createObjectURL(entry.blob);
+
+    img.src = objectURL;
     img.alt = `Saved Photo ${index + 1}`;
     img.classList.add("saved-photo");
 
-    img.addEventListener("click", () => openPhotoModal(photoSrc));
+    img.addEventListener("click", () => openPhotoModal(objectURL));
 
     const deleteBtn = document.createElement("button");
     deleteBtn.textContent = "Delete";
     deleteBtn.classList.add("delete-btn");
 
-    deleteBtn.addEventListener("click", () => {
+    deleteBtn.addEventListener("click", async () => {
       soundManager.play("delete");
-      delete takenPhotos[key];
-
-      const updatedPhotos = {};
-      Object.values(takenPhotos).forEach((photo, index) => {
-        updatedPhotos[index + 1] = photo;
-      });
-
-      localStorage.setItem("savedCanvasImage", JSON.stringify(updatedPhotos));
-      displayTakenPhotos();
-      updatePhotoCounter();
+      await deletePhotoFromDB(entry.id);
+      await displayTakenPhotos();
+      await updatePhotoCounter();
     });
 
     wrapper.appendChild(img);
@@ -1181,9 +1296,11 @@ themeBtn.addEventListener("click", () => {
 // =========================
 // INIT
 // =========================
-document.addEventListener("DOMContentLoaded", () => {
-  displayTakenPhotos();
-  updatePhotoCounter();
+document.addEventListener("DOMContentLoaded", async () => {
+  await initDB();
+  await migrateLocalStorageToIndexedDB();
+  await displayTakenPhotos();
+  await updatePhotoCounter();
 });
 
 function syncOverlaySize() {

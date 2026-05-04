@@ -171,6 +171,9 @@ function buildPhotoStrip(images) {
 
     latestPhotoStrip = stripURL;
 
+    blob = e.data.blob;
+    await addPhotoToDB(blob, "strip");
+
     photo.src = stripURL;
     photo.style.display = "block";
     photo.style.opacity = "1";
