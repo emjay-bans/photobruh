@@ -110,11 +110,11 @@ function capturePhotoToDataURL() {
   const context = canvas.getContext("2d");
   const visible = getVisibleVideoRect();
 
-const width = visible.drawW;
-const height = visible.drawH;
+  const width = visible.drawW;
+  const height = visible.drawH;
 
-canvas.width = width;
-canvas.height = height;
+  canvas.width = width;
+  canvas.height = height;
 
   context.clearRect(0, 0, width, height);
   context.save();
@@ -129,23 +129,27 @@ canvas.height = height;
   }
 
 
-context.drawImage(
-  cameraFeed,
-  visible.offsetX,   // source x
-  visible.offsetY,   // source y
-  visible.drawW,     // source width
-  visible.drawH,     // source height
-  0,                 // destination x
-  0,                 // destination y
-  width,             // destination width
-  height             // destination height
-);
+  context.drawImage(
+    cameraFeed,
+    visible.offsetX,   // source x
+    visible.offsetY,   // source y
+    visible.drawW,     // source width
+    visible.drawH,     // source height
+    0,                 // destination x
+    0,                 // destination y
+    width,             // destination width
+    height             // destination height
+  );
 
   if (activeFaceFilter && trackedFaces.length) {
-  trackedFaces.forEach((face, i) => {
-    drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
-  });
-}
+    trackedFaces.forEach((face, i) => {
+      drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
+    });
+  }
+
+  if (activeAnimatedFilter) {
+    drawAnimatedFilter(context);
+  }
 
   context.restore();
 
