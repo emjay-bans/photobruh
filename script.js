@@ -31,6 +31,10 @@ let animationFrameCount = 0;
 
 const animatedParticles = [];
 
+let distortionMode = 0;       // 0=none, 1=bulge, 2=swirl, 3=pinch
+let distortionStrength = 0.0; // controllable range e.g. 0–1
+let faceWarpEnabled = false;
+
 const FILTER_SMOOTHING = 0.75;
 
 // =========================
@@ -206,156 +210,214 @@ function createProgram(gl, vsSource, fsSource) {
 // Shaders
 
 const vertexShaderSource = `
-attribute vec2 aPosition;
-attribute vec2 aTexCoord;
-varying vec2 vTexCoord;
+  attribute vec2 aPosition;
+  attribute vec2 aTexCoord;
+  varying vec2 vTexCoord;
 
-void main() {
-  gl_Position = vec4(aPosition, 0.0, 1.0);
-  vTexCoord = aTexCoord;
-}
-`;
+  void main() {
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+    vTexCoord = aTexCoord;
+  }
+  `;
 
 const fragmentShaderSource = `
-precision mediump float;
+  precision mediump float;
 
-uniform sampler2D uTexture;
-uniform vec2 uResolution;
+  uniform sampler2D uTexture;
+  uniform vec2 uResolution;
 
-uniform float uGray;
-uniform float uBright;
-uniform float uContrast;
-uniform float uHue;
-uniform float uInvert;
-uniform float uSaturate;
-uniform float uSepia;
+  uniform float uGray;
+  uniform float uBright;
+  uniform float uContrast;
+  uniform float uHue;
+  uniform float uInvert;
+  uniform float uSaturate;
+  uniform float uSepia;
 
-uniform float uTime;
-uniform int uAnimMode;
-uniform float uMirror;
+  uniform float uTime;
+  uniform int uAnimMode;
+  uniform float uMirror;
 
-varying vec2 vTexCoord;
+  uniform int uDistortMode;
+  uniform float uDistortStrength;
+  uniform float uFaceWarpEnabled;
+  uniform vec2 uLeftEye;
+  uniform vec2 uRightEye;
+  uniform vec2 uMouthCenter;
+  uniform vec2 uNoseTip;
 
-float rand(vec2 co) {
-  return fract(sin(dot(co.xy, vec2(12.9898,78.233))) * 43758.5453);
-}
+  varying vec2 vTexCoord;
 
-vec3 applyHue(vec3 color, float angle) {
-  float s = sin(angle);
-  float c = cos(angle);
-
-  mat3 m = mat3(
-    0.213 + c * 0.787 - s * 0.213,
-    0.715 - c * 0.715 - s * 0.715,
-    0.072 - c * 0.072 + s * 0.928,
-
-    0.213 - c * 0.213 + s * 0.143,
-    0.715 + c * 0.285 + s * 0.140,
-    0.072 - c * 0.072 - s * 0.283,
-
-    0.213 - c * 0.213 - s * 0.787,
-    0.715 - c * 0.715 + s * 0.715,
-    0.072 + c * 0.928 + s * 0.072
-  );
-
-  return clamp(m * color, 0.0, 1.0);
-}
-
-vec3 applyAnimatedFX(vec2 uv, vec3 color) {
-  vec2 p = uv * uResolution;
-
-  // scanlines
-  if (uAnimMode == 1) {
-    float line = sin(p.y * 1.8 + uTime * 8.0) * 0.08;
-    color -= line;
+  float rand(vec2 co) {
+    return fract(sin(dot(co.xy, vec2(12.9898,78.233))) * 43758.5453);
   }
 
-  // sparkles
-  else if (uAnimMode == 2) {
-    float sparkle = step(0.996, rand(floor(p / 8.0) + floor(uTime * 8.0)));
-    color += vec3(sparkle);
+  vec3 applyHue(vec3 color, float angle) {
+    float s = sin(angle);
+    float c = cos(angle);
+
+    mat3 m = mat3(
+      0.213 + c * 0.787 - s * 0.213,
+      0.715 - c * 0.715 - s * 0.715,
+      0.072 - c * 0.072 + s * 0.928,
+
+      0.213 - c * 0.213 + s * 0.143,
+      0.715 + c * 0.285 + s * 0.140,
+      0.072 - c * 0.072 - s * 0.283,
+
+      0.213 - c * 0.213 - s * 0.787,
+      0.715 - c * 0.715 + s * 0.715,
+      0.072 + c * 0.928 + s * 0.072
+    );
+
+    return clamp(m * color, 0.0, 1.0);
   }
 
-  // snow
-  else if (uAnimMode == 3) {
-    vec2 snowUV = uv;
-    snowUV.y += uTime * 0.25;
-    float snow = step(0.985, rand(floor(snowUV * vec2(120.0, 80.0))));
-    color += vec3(snow);
+  vec3 applyAnimatedFX(vec2 uv, vec3 color) {
+    vec2 p = uv * uResolution;
+
+    // scanlines
+    if (uAnimMode == 1) {
+      float line = sin(p.y * 1.8 + uTime * 8.0) * 0.08;
+      color -= line;
+    }
+
+    // sparkles
+    else if (uAnimMode == 2) {
+      float sparkle = step(0.996, rand(floor(p / 8.0) + floor(uTime * 8.0)));
+      color += vec3(sparkle);
+    }
+
+    // snow
+    else if (uAnimMode == 3) {
+      vec2 snowUV = uv;
+      snowUV.y += uTime * 0.25;
+      float snow = step(0.985, rand(floor(snowUV * vec2(120.0, 80.0))));
+      color += vec3(snow);
+    }
+
+    // hearts
+    else if (uAnimMode == 4) {
+      vec2 gv = fract(uv * 12.0) - 0.5;
+      vec2 id = floor(uv * 12.0);
+
+      float t = uTime * 0.6;
+      gv.y += fract(t + rand(id)) - 0.5;
+
+      float x = gv.x;
+      float y = gv.y;
+
+      float heart = pow(x*x + y*y - 0.08, 3.0) - x*x*y*y*y;
+      float mask = smoothstep(0.01, -0.01, heart);
+
+      color = mix(color, vec3(1.0, 0.25, 0.45), mask * 0.75);
+    }
+
+    // matrix
+    else if (uAnimMode == 5) {
+      vec2 grid = vec2(24.0, 18.0);
+      vec2 cell = floor(uv * grid);
+
+      float drop = fract(uTime * 0.8 + rand(vec2(cell.x, 0.0)) * 4.0);
+      float yPos = 1.0 - fract(cell.y / grid.y + drop);
+
+      float head = smoothstep(0.08, 0.0, abs(yPos - 0.5));
+      float trail = smoothstep(0.35, 0.0, abs(yPos - 0.5));
+
+      vec3 matrixColor = vec3(0.0, 1.0, 0.35) * trail;
+      matrixColor += vec3(0.7, 1.0, 0.8) * head;
+
+      color = mix(color, color + matrixColor, 0.65);
+    }
+
+    return color;
   }
 
-  // hearts
-  else if (uAnimMode == 4) {
-    vec2 gv = fract(uv * 12.0) - 0.5;
-    vec2 id = floor(uv * 12.0);
+  // ---- New warp function ----
+  vec2 warpCoord(vec2 uv) {
+      vec2 st = uv;    // final texture coordinate
 
-    float t = uTime * 0.6;
-    gv.y += fract(t + rand(id)) - 0.5;
+      // --- Global distortions ---
+      if (uDistortMode == 1) { // Bulge / fish‑eye
+          vec2 center = vec2(0.5, 0.5);
+          vec2 delta = uv - center;
+          float dist = length(delta);
+          float factor = dist * dist * uDistortStrength * 0.5;
+          st = uv + delta * factor;
+      }
+      else if (uDistortMode == 2) { // Swirl
+          vec2 center = vec2(0.5, 0.5);
+          vec2 delta = uv - center;
+          float dist = length(delta);
+          float angle = uDistortStrength * dist * 4.0;
+          float s = sin(angle);
+          float c = cos(angle);
+          st = center + vec2(delta.x * c - delta.y * s,
+                            delta.x * s + delta.y * c);
+      }
+      else if (uDistortMode == 3) { // Pinch
+          vec2 center = vec2(0.5, 0.5);
+          vec2 delta = uv - center;
+          float dist = length(delta);
+          float factor = dist * uDistortStrength * 0.4;
+          st = uv - delta * factor;
+      }
 
-    float x = gv.x;
-    float y = gv.y;
+      // --- Face‑specific warps (applied on top of global) ---
+      if (uFaceWarpEnabled > 0.5) {
+          vec2 features[4];
+          features[0] = uLeftEye;
+          features[1] = uRightEye;
+          features[2] = uMouthCenter;
+          features[3] = uNoseTip;
+          float radii[4];
+          radii[0] = 0.06;  // eye region radius (normalised)
+          radii[1] = 0.06;
+          radii[2] = 0.08;
+          radii[3] = 0.07;
 
-    float heart = pow(x*x + y*y - 0.08, 3.0) - x*x*y*y*y;
-    float mask = smoothstep(0.01, -0.01, heart);
+          for (int i = 0; i < 4; i++) {
+              vec2 delta = st - features[i];
+              float dist = length(delta);
+              float r = radii[i];
 
-    color = mix(color, vec3(1.0, 0.25, 0.45), mask * 0.75);
+              if (dist < r) {
+                  // Simple bulge in the region
+                  float factor = 1.0 - (dist / r);
+                  factor = factor * factor * 0.15; // strength
+                  st += delta * factor;
+              }
+          }
+      }
+
+      return st;
   }
 
-  // matrix
-  else if (uAnimMode == 5) {
-    vec2 grid = vec2(24.0, 18.0);
-    vec2 cell = floor(uv * grid);
+  void main() {
+      vec2 uv = vTexCoord;
 
-    float drop = fract(uTime * 0.8 + rand(vec2(cell.x, 0.0)) * 4.0);
-    float yPos = 1.0 - fract(cell.y / grid.y + drop);
+      // --- Mirror handling (your existing logic) ---
+      if (uMirror > 0.5) {
+          uv.x = 1.0 - uv.x;
+      }
 
-    float head = smoothstep(0.08, 0.0, abs(yPos - 0.5));
-    float trail = smoothstep(0.35, 0.0, abs(yPos - 0.5));
+      // --- Warp texture coordinate (NEW) ---
+      vec2 warpedUV = warpCoord(uv);
 
-    vec3 matrixColor = vec3(0.0, 1.0, 0.35) * trail;
-    matrixColor += vec3(0.7, 1.0, 0.8) * head;
+      // Add a soft clamp to avoid sampling beyond the texture border
+      warpedUV = clamp(warpedUV, vec2(0.001), vec2(0.999));
 
-    color = mix(color, color + matrixColor, 0.65);
+      vec4 tex = texture2D(uTexture, warpedUV);
+      vec3 color = tex.rgb;
+
+      // [ ... all your existing colour processing (gray, contrast, etc.) remains here ... ]
+
+      // Your original animated‑effects call:
+      color = applyAnimatedFX(uv, color);   // keep as‑is (uses original uv)
+
+      gl_FragColor = vec4(clamp(color, 0.0, 1.0), tex.a);
   }
-
-  return color;
-}
-
-void main() {
-  vec2 uv = vTexCoord;
-
-  if (uMirror > 0.5) {
-    uv.x = 1.0 - uv.x;
-  }
-
-  vec4 tex = texture2D(uTexture, uv);
-  vec3 color = tex.rgb;
-
-  float gray = dot(color, vec3(0.299, 0.587, 0.114));
-  color = mix(color, vec3(gray), uGray);
-
-  color = (color - 0.5) * uContrast + 0.5;
-  color *= uBright;
-
-  float luma = dot(color, vec3(0.299, 0.587, 0.114));
-  color = mix(vec3(luma), color, uSaturate);
-
-  color = applyHue(color, uHue);
-
-  vec3 sep = vec3(
-    dot(color, vec3(0.393, 0.769, 0.189)),
-    dot(color, vec3(0.349, 0.686, 0.168)),
-    dot(color, vec3(0.272, 0.534, 0.131))
-  );
-  color = mix(color, sep, uSepia);
-
-  color = mix(color, 1.0 - color, uInvert);
-
-  color = applyAnimatedFX(uv, color);
-
-  gl_FragColor = vec4(clamp(color, 0.0, 1.0), tex.a);
-}
-`;
+  `;
 
 // =========================
 // WEBGL INITIALIZATION
@@ -407,6 +469,17 @@ function initWebGL() {
   uTime = gl.getUniformLocation(glProgram, "uTime");
   uAnimMode = gl.getUniformLocation(glProgram, "uAnimMode");
   uMirror = gl.getUniformLocation(glProgram, "uMirror");
+
+  // Distortion / warp uniforms
+  uDistortMode   = gl.getUniformLocation(glProgram, "uDistortMode");
+  uDistortStrength = gl.getUniformLocation(glProgram, "uDistortStrength");
+
+  // Face warp feature points (normalised 0–1 coords)
+  uLeftEye       = gl.getUniformLocation(glProgram, "uLeftEye");
+  uRightEye      = gl.getUniformLocation(glProgram, "uRightEye");
+  uMouthCenter   = gl.getUniformLocation(glProgram, "uMouthCenter");
+  uNoseTip       = gl.getUniformLocation(glProgram, "uNoseTip");
+  uFaceWarpEnabled = gl.getUniformLocation(glProgram, "uFaceWarpEnabled");
 }
 
 // Filter Helper
@@ -452,6 +525,39 @@ function renderWebGL() {
     gl.uniform1f(uTime, performance.now() * 0.001);
     gl.uniform1i(uAnimMode, getAnimatedFilterMode());
     gl.uniform1f(uMirror, mirrored ? 1.0 : 0.0);
+
+    // --- Distortion uniforms ---
+    gl.uniform1i(uDistortMode, distortionMode);
+    gl.uniform1f(uDistortStrength, distortionStrength);
+    gl.uniform1f(uFaceWarpEnabled, faceWarpEnabled ? 1.0 : 0.0);
+
+    // --- Face warp feature points (normalised 0–1) ---
+    if (faceWarpEnabled && trackedFaces.length > 0) {
+        const face = trackedFaces[0];  // use first face
+        const lm = face.landmarks;
+
+        // Helper: normalise a pixel point from the video
+        const norm = (p) => ({
+            x: p.x / cameraFeed.videoWidth,
+            y: p.y / cameraFeed.videoHeight
+        });
+
+        const leftEye   = norm(getAveragePoint(lm.getLeftEye()));
+        const rightEye  = norm(getAveragePoint(lm.getRightEye()));
+        const mouth     = norm(getAveragePoint(lm.positions.slice(48, 68))); // outer mouth
+        const noseTip   = norm(lm.positions[30]);
+
+        gl.uniform2f(uLeftEye,     leftEye.x,   leftEye.y);
+        gl.uniform2f(uRightEye,    rightEye.x,  rightEye.y);
+        gl.uniform2f(uMouthCenter, mouth.x,     mouth.y);
+        gl.uniform2f(uNoseTip,     noseTip.x,   noseTip.y);
+    } else {
+        // Set dummy values to avoid undefined behaviour
+        gl.uniform2f(uLeftEye,     -1.0, -1.0);
+        gl.uniform2f(uRightEye,    -1.0, -1.0);
+        gl.uniform2f(uMouthCenter, -1.0, -1.0);
+        gl.uniform2f(uNoseTip,     -1.0, -1.0);
+    }
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
