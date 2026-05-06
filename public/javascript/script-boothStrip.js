@@ -4,7 +4,9 @@ let isBooth;
 // PHOTO STRIP STATE
 // =========================
 const stripCanvas = document.createElement("canvas");
-const stripCtx = stripCanvas.getContext("2d");
+const stripCtx = stripCanvas.getContext("2d", {
+  willReadFrequently: true
+});
 
 let photoStripImages = [];
 let latestPhotoStrip = null;
@@ -130,7 +132,7 @@ function capturePhotoToDataURL() {
 
 
   context.drawImage(
-    cameraFeed,
+    glCanvas,
     visible.offsetX,   // source x
     visible.offsetY,   // source y
     visible.drawW,     // source width
@@ -147,7 +149,10 @@ function capturePhotoToDataURL() {
     });
   }
 
-  if (activeAnimatedFilter) {
+  if (
+    activeAnimatedFilter &&
+    ["sparkles", "snow", "hearts", "matrix"].includes(activeAnimatedFilter)
+  ) {
     drawAnimatedFilter(context);
   }
 
@@ -171,7 +176,6 @@ function buildPhotoStrip(images) {
 
     latestPhotoStrip = stripURL;
 
-    blob = e.data.blob;
     await addPhotoToDB(blob, "strip");
 
     photo.src = stripURL;
@@ -234,16 +238,21 @@ function flashCaptureEffect() {
 }
 
 function mapLandmarkToCanvas(point, video, canvas) {
-  const visible = getVisibleVideoRect();
+  const videoW = video.videoWidth;
+  const videoH = video.videoHeight;
 
-  // remove cropped-away area first
-  const croppedX = point.x - visible.offsetX;
-  const croppedY = point.y - visible.offsetY;
+  if (!videoW || !videoH) {
+    return { x: 0, y: 0 };
+  }
 
-  // map only visible region into canvas space
+  // normalize landmark into video space
+  const nx = point.x / videoW;
+  const ny = point.y / videoH;
+
+  // map directly into overlay canvas space
   return {
-    x: (croppedX / visible.drawW) * canvas.width,
-    y: (croppedY / visible.drawH) * canvas.height
+    x: nx * canvas.width,
+    y: ny * canvas.height
   };
 }
 

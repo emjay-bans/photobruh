@@ -149,6 +149,316 @@ async function migrateLocalStorageToIndexedDB() {
   localStorage.removeItem("savedCanvasImage");
 }
 
+// =========================
+// WEBGL RENDERER
+// =========================
+
+const glCanvas = document.getElementById("glCanvas");
+const gl = glCanvas.getContext("webgl", {
+  premultipliedAlpha: false,
+  antialias: false,
+  preserveDrawingBuffer: true,
+  willReadFrequently: true
+});
+
+let glProgram;
+let videoTexture;
+let glBuffer;
+
+let uGray, uBright, uContrast, uHue, uInvert, uSaturate, uSepia;
+let uResolution, uTexture, uTime, uAnimMode, uMirror;
+
+// =========================
+// SHADER SETUP
+// =========================
+
+function createShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(shader));
+    gl.deleteShader(shader);
+    return null;
+  }
+
+  return shader;
+}
+
+function createProgram(gl, vsSource, fsSource) {
+  const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+  const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+  const program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(program));
+    return null;
+  }
+
+  return program;
+}
+
+// Shaders
+
+const vertexShaderSource = `
+attribute vec2 aPosition;
+attribute vec2 aTexCoord;
+varying vec2 vTexCoord;
+
+void main() {
+  gl_Position = vec4(aPosition, 0.0, 1.0);
+  vTexCoord = aTexCoord;
+}
+`;
+
+const fragmentShaderSource = `
+precision mediump float;
+
+uniform sampler2D uTexture;
+uniform vec2 uResolution;
+
+uniform float uGray;
+uniform float uBright;
+uniform float uContrast;
+uniform float uHue;
+uniform float uInvert;
+uniform float uSaturate;
+uniform float uSepia;
+
+uniform float uTime;
+uniform int uAnimMode;
+uniform float uMirror;
+
+varying vec2 vTexCoord;
+
+float rand(vec2 co) {
+  return fract(sin(dot(co.xy, vec2(12.9898,78.233))) * 43758.5453);
+}
+
+vec3 applyHue(vec3 color, float angle) {
+  float s = sin(angle);
+  float c = cos(angle);
+
+  mat3 m = mat3(
+    0.213 + c * 0.787 - s * 0.213,
+    0.715 - c * 0.715 - s * 0.715,
+    0.072 - c * 0.072 + s * 0.928,
+
+    0.213 - c * 0.213 + s * 0.143,
+    0.715 + c * 0.285 + s * 0.140,
+    0.072 - c * 0.072 - s * 0.283,
+
+    0.213 - c * 0.213 - s * 0.787,
+    0.715 - c * 0.715 + s * 0.715,
+    0.072 + c * 0.928 + s * 0.072
+  );
+
+  return clamp(m * color, 0.0, 1.0);
+}
+
+vec3 applyAnimatedFX(vec2 uv, vec3 color) {
+  vec2 p = uv * uResolution;
+
+  // scanlines
+  if (uAnimMode == 1) {
+    float line = sin(p.y * 1.8 + uTime * 8.0) * 0.08;
+    color -= line;
+  }
+
+  // sparkles
+  else if (uAnimMode == 2) {
+    float sparkle = step(0.996, rand(floor(p / 8.0) + floor(uTime * 8.0)));
+    color += vec3(sparkle);
+  }
+
+  // snow
+  else if (uAnimMode == 3) {
+    vec2 snowUV = uv;
+    snowUV.y += uTime * 0.25;
+    float snow = step(0.985, rand(floor(snowUV * vec2(120.0, 80.0))));
+    color += vec3(snow);
+  }
+
+  // hearts
+  else if (uAnimMode == 4) {
+    vec2 gv = fract(uv * 12.0) - 0.5;
+    vec2 id = floor(uv * 12.0);
+
+    float t = uTime * 0.6;
+    gv.y += fract(t + rand(id)) - 0.5;
+
+    float x = gv.x;
+    float y = gv.y;
+
+    float heart = pow(x*x + y*y - 0.08, 3.0) - x*x*y*y*y;
+    float mask = smoothstep(0.01, -0.01, heart);
+
+    color = mix(color, vec3(1.0, 0.25, 0.45), mask * 0.75);
+  }
+
+  // matrix
+  else if (uAnimMode == 5) {
+    vec2 grid = vec2(24.0, 18.0);
+    vec2 cell = floor(uv * grid);
+
+    float drop = fract(uTime * 0.8 + rand(vec2(cell.x, 0.0)) * 4.0);
+    float yPos = 1.0 - fract(cell.y / grid.y + drop);
+
+    float head = smoothstep(0.08, 0.0, abs(yPos - 0.5));
+    float trail = smoothstep(0.35, 0.0, abs(yPos - 0.5));
+
+    vec3 matrixColor = vec3(0.0, 1.0, 0.35) * trail;
+    matrixColor += vec3(0.7, 1.0, 0.8) * head;
+
+    color = mix(color, color + matrixColor, 0.65);
+  }
+
+  return color;
+}
+
+void main() {
+  vec2 uv = vTexCoord;
+
+  if (uMirror > 0.5) {
+    uv.x = 1.0 - uv.x;
+  }
+
+  vec4 tex = texture2D(uTexture, uv);
+  vec3 color = tex.rgb;
+
+  float gray = dot(color, vec3(0.299, 0.587, 0.114));
+  color = mix(color, vec3(gray), uGray);
+
+  color = (color - 0.5) * uContrast + 0.5;
+  color *= uBright;
+
+  float luma = dot(color, vec3(0.299, 0.587, 0.114));
+  color = mix(vec3(luma), color, uSaturate);
+
+  color = applyHue(color, uHue);
+
+  vec3 sep = vec3(
+    dot(color, vec3(0.393, 0.769, 0.189)),
+    dot(color, vec3(0.349, 0.686, 0.168)),
+    dot(color, vec3(0.272, 0.534, 0.131))
+  );
+  color = mix(color, sep, uSepia);
+
+  color = mix(color, 1.0 - color, uInvert);
+
+  color = applyAnimatedFX(uv, color);
+
+  gl_FragColor = vec4(clamp(color, 0.0, 1.0), tex.a);
+}
+`;
+
+// =========================
+// WEBGL INITIALIZATION
+// =========================
+
+function initWebGL() {
+  glProgram = createProgram(gl, vertexShaderSource, fragmentShaderSource);
+  gl.useProgram(glProgram);
+
+  const vertices = new Float32Array([
+    -1, -1,  0, 1,
+     1, -1,  1, 1,
+    -1,  1,  0, 0,
+     1,  1,  1, 0
+  ]);
+
+  glBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, glBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+  const aPosition = gl.getAttribLocation(glProgram, "aPosition");
+  const aTexCoord = gl.getAttribLocation(glProgram, "aTexCoord");
+
+  gl.enableVertexAttribArray(aPosition);
+  gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 16, 0);
+
+  gl.enableVertexAttribArray(aTexCoord);
+  gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, false, 16, 8);
+
+  videoTexture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+  uTexture = gl.getUniformLocation(glProgram, "uTexture");
+  uResolution = gl.getUniformLocation(glProgram, "uResolution");
+
+  uGray = gl.getUniformLocation(glProgram, "uGray");
+  uBright = gl.getUniformLocation(glProgram, "uBright");
+  uContrast = gl.getUniformLocation(glProgram, "uContrast");
+  uHue = gl.getUniformLocation(glProgram, "uHue");
+  uInvert = gl.getUniformLocation(glProgram, "uInvert");
+  uSaturate = gl.getUniformLocation(glProgram, "uSaturate");
+  uSepia = gl.getUniformLocation(glProgram, "uSepia");
+
+  uTime = gl.getUniformLocation(glProgram, "uTime");
+  uAnimMode = gl.getUniformLocation(glProgram, "uAnimMode");
+  uMirror = gl.getUniformLocation(glProgram, "uMirror");
+}
+
+// Filter Helper
+
+function getAnimatedFilterMode() {
+  switch (activeAnimatedFilter) {
+    case "scanlines": return 1;
+    default: return 0;
+  }
+}
+
+// =========================
+// LIVE WEBGL RENDER LOOP
+// =========================
+
+function renderWebGL() {
+  if (cameraFeed.readyState >= 2) {
+    gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+
+    gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      cameraFeed
+    );
+
+    const fx = effectsManager.effects;
+
+    gl.uniform1i(uTexture, 0);
+    gl.uniform2f(uResolution, glCanvas.width, glCanvas.height);
+
+    gl.uniform1f(uGray, fx.grayscale / 100);
+    gl.uniform1f(uBright, fx.brightness / 100);
+    gl.uniform1f(uContrast, fx.contrast / 100);
+    gl.uniform1f(uHue, (fx.hue / 200.0) * 6.28318);
+    gl.uniform1f(uInvert, fx.invert / 100);
+    gl.uniform1f(uSaturate, fx.saturate / 100);
+    gl.uniform1f(uSepia, fx.sepia / 100);
+
+    gl.uniform1f(uTime, performance.now() * 0.001);
+    gl.uniform1i(uAnimMode, getAnimatedFilterMode());
+    gl.uniform1f(uMirror, mirrored ? 1.0 : 0.0);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  requestAnimationFrame(renderWebGL);
+}
+
 // ==============
 // LOADING SCREEN
 // ==============
@@ -173,13 +483,27 @@ function hideLoadingScreen() {
 // LIVE FILTER OVERLAY CANVAS
 // =========================
 const overlayCanvas = document.createElement("canvas");
+const offCtx = overlayCanvas.getContext("2d", {
+  willReadFrequently: true
+});
 overlayCanvas.id = "filterOverlay";
 overlayCanvas.width = 1280;
 overlayCanvas.height = 720;
 
+overlayCanvas.style.position = "absolute";
+overlayCanvas.style.top = "0";
+overlayCanvas.style.left = "0";
+overlayCanvas.style.width = "1280px";
+overlayCanvas.style.height = "720px";
+overlayCanvas.style.zIndex = "2";
+overlayCanvas.style.pointerEvents = "none";
+overlayCanvas.style.background = "transparent";
+
 document.getElementById("cameraWrapper").appendChild(overlayCanvas);
 
-const overlayCtx = overlayCanvas.getContext("2d");
+const overlayCtx = overlayCanvas.getContext("2d", {
+  willReadFrequently: true
+});
 
 // =========================
 // FILTER ASSETS
@@ -261,13 +585,7 @@ async function startCamera(facingMode = currentFacingMode) {
       switchCameraBtn.style.display = "none";
     }
 
-    if (currentFacingMode === "user") {
-      mirrored = true;
-      cameraFeed.style.transform = "scaleX(-1)";
-    } else {
-      mirrored = false;
-      cameraFeed.style.transform = "scaleX(1)";
-    }
+    mirrored = currentFacingMode === "user";
 
     syncOverlaySize();
   } catch (error) {
@@ -276,9 +594,12 @@ async function startCamera(facingMode = currentFacingMode) {
 }
 
 (async () => {
+  initWebGL();
   await startCamera("user");
   await loadFaceModels();
   updateBootLine("boot1", "Initializing Camera...", true);
+
+  renderWebGL();
   renderOverlayLoop();
 })();
 
@@ -419,23 +740,41 @@ function lerp(a, b, t) {
 function renderOverlayLoop() {
   overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
+  // Face filters
   if (activeFaceFilter && trackedFaces.length) {
-  overlayCtx.save();
+    overlayCtx.save();
 
-  if (mirrored) {
-    overlayCtx.translate(overlayCanvas.width, 0);
-    overlayCtx.scale(-1, 1);
+    if (mirrored) {
+      overlayCtx.translate(overlayCanvas.width, 0);
+      overlayCtx.scale(-1, 1);
+    }
+
+    trackedFaces.forEach((face, i) => {
+      drawFaceFilter(
+        overlayCtx,
+        face,
+        cameraFeed,
+        dogTransforms[i],
+        activeFaceFilter,
+        true
+      );
+    });
+
+    overlayCtx.restore();
   }
 
-  trackedFaces.forEach((face, i) => {
-    drawFaceFilter(overlayCtx, face, cameraFeed, dogTransforms[i], activeFaceFilter, true);
-  });
-
-  overlayCtx.restore();
-}
-
+  // Animated overlays (always independent)
   if (activeAnimatedFilter) {
+    overlayCtx.save();
+
+    if (mirrored) {
+      overlayCtx.translate(overlayCanvas.width, 0);
+      overlayCtx.scale(-1, 1);
+    }
+
     drawAnimatedFilter(overlayCtx);
+
+    overlayCtx.restore();
   }
 
   animationFrameCount++;
@@ -468,7 +807,6 @@ function drawAnimatedFilter(ctx) {
 mirrorer.addEventListener('click', () => {
   soundManager.play("click");
   mirrored = !mirrored;
-  cameraFeed.style.transform = mirrored ? 'scaleX(-1)' : 'scaleX(1)';
 });
 
 // =========================
@@ -576,7 +914,6 @@ class EffectsManager {
 
   applyEffects() {
     const filterString = this.buildFilterString();
-    cameraFeed.style.filter = filterString;
     photo.style.filter = filterString;
   }
 
@@ -750,10 +1087,10 @@ function getVisibleVideoRect() {
 // =========================
 function drawFaceFilter(context, detection, videoElement, transform, filterType, useSmoothing = true) {
   const assets = faceFilterAssets[filterType];
-if (!assets) return;
+  if (!assets) return;
 
-const earsImg = assets.ears;
-const noseImg = assets.nose;
+  const earsImg = assets.ears;
+  const noseImg = assets.nose;
   if (!detection) return;
 
   const canvas = context.canvas;
@@ -806,34 +1143,36 @@ const noseImg = assets.nose;
   const angle = Math.atan2(dy, dx);
 
   const faceWidth = Math.abs(jawRight.x - jawLeft.x);
-  const scale = faceWidth / 220;
+
+  // restore original proportional scaling
+  let scale = faceWidth / 200;
 
   // Smooth full transform
   const finalX = useSmoothing
-  ? (transform.x = lerp(transform.x, eyeCenterX, 1 - FILTER_SMOOTHING))
-  : eyeCenterX;
+    ? (transform.x = lerp(transform.x, eyeCenterX, 1 - FILTER_SMOOTHING))
+    : eyeCenterX;
 
-const finalY = useSmoothing
-  ? (transform.y = lerp(transform.y, eyeCenterY, 1 - FILTER_SMOOTHING))
-  : eyeCenterY;
+  const finalY = useSmoothing
+    ? (transform.y = lerp(transform.y, eyeCenterY, 1 - FILTER_SMOOTHING))
+    : eyeCenterY;
 
-const finalAngle = useSmoothing
-  ? (transform.angle = lerp(transform.angle, angle, 1 - FILTER_SMOOTHING))
-  : angle;
+  const finalAngle = useSmoothing
+    ? (transform.angle = lerp(transform.angle, angle, 1 - FILTER_SMOOTHING))
+    : angle;
 
-const finalScale = useSmoothing
-  ? (transform.scale = lerp(transform.scale, scale, 1 - FILTER_SMOOTHING))
-  : scale;
+  const finalScale = useSmoothing
+    ? (transform.scale = lerp(transform.scale, scale, 1 - FILTER_SMOOTHING))
+    : scale;
 
 
   // ===== EARS =====
-context.save();
-context.translate(finalX, finalY);
-context.rotate(finalAngle);
+  context.save();
+  context.translate(finalX, finalY);
+  context.rotate(finalAngle);
 
-let earsWidth = 260 * finalScale;
-let earsHeight = 180 * finalScale;
-if (filterType == 'minion') {
+  let earsWidth = 260 * finalScale;
+  let earsHeight = 180 * finalScale;
+  if (filterType == 'minion') {
     earsWidth = 216 * finalScale
     earsHeight = 270 * finalScale
   } else if (filterType == 'rabbid') {
@@ -845,103 +1184,103 @@ if (filterType == 'minion') {
   }
 
 // place ears relative to eyebrow line instead of hardcoded lift
-const browOffsetY = browCenterY - eyeCenterY;
+  const browOffsetY = browCenterY - eyeCenterY;
 
   // one clean vertical offset for ears
   let earsY = browOffsetY - (195 * finalScale);
   if (filterType == 'minion') {
-  earsY = browOffsetY - (195 * finalScale) + (100 * finalScale);
-} else if (filterType == 'rabbid') {
-  earsY = browOffsetY - (195 * finalScale) - (120 * finalScale);
-} else if (filterType == 'shrek') {
-  earsY = browOffsetY - (195 * finalScale) - (50 * finalScale);
-}
+    earsY = browOffsetY - (195 * finalScale) + (100 * finalScale);
+  } else if (filterType == 'rabbid') {
+    earsY = browOffsetY - (195 * finalScale) - (120 * finalScale);
+  } else if (filterType == 'shrek') {
+    earsY = browOffsetY - (195 * finalScale) - (50 * finalScale);
+  }
 
   if (filterType != 'mustache' && filterType != 'lorax' && filterType != 'woah') {
     context.drawImage(
-    earsImg,
-    -earsWidth / 2,
-    earsY,
-    earsWidth,
-    earsHeight
-  );
+      earsImg,
+      -earsWidth / 2,
+      earsY,
+      earsWidth,
+      earsHeight
+    );
   }
 
 
-context.restore();
+  context.restore();
 
   // ===== NOSE =====
-context.save();
-context.translate(finalX, finalY);
-context.rotate(finalAngle);
+  context.save();
+  context.translate(finalX, finalY);
+  context.rotate(finalAngle);
 
-// nose offset relative to face center (LOCAL face space)
-const rawNoseOffsetX = nose.x - eyeCenterX;
-const rawNoseOffsetY = nose.y - eyeCenterY;
+  // nose offset relative to face center (LOCAL face space)
+  const rawNoseOffsetX = nose.x - eyeCenterX;
+  const rawNoseOffsetY = nose.y - eyeCenterY;
 
-const noseOffsetX = useSmoothing
-  ? (transform.noseOffsetX = lerp(transform.noseOffsetX, rawNoseOffsetX, 1 - FILTER_SMOOTHING))
-  : rawNoseOffsetX;
+  const noseOffsetX = useSmoothing
+    ? (transform.noseOffsetX = lerp(transform.noseOffsetX, rawNoseOffsetX, 1 - FILTER_SMOOTHING))
+    : rawNoseOffsetX;
 
-let noseOffsetY = useSmoothing
-  ? (transform.noseOffsetY = lerp(transform.noseOffsetY, rawNoseOffsetY, 1 - FILTER_SMOOTHING))
-  : rawNoseOffsetY;
+  let noseOffsetY = useSmoothing
+    ? (transform.noseOffsetY = lerp(transform.noseOffsetY, rawNoseOffsetY, 1 - FILTER_SMOOTHING))
+    : rawNoseOffsetY;
 
-const filterNoseYOffset = {
-  dog: 0,
-  cat: 20,
-  mustache: 35,
-  rabbid: 60,
-  lorax: -10,
-  minion: 0
-};
+  const filterNoseYOffset = {
+    dog: 0,
+    cat: 20,
+    mustache: 35,
+    rabbid: 60,
+    lorax: -10,
+    minion: 0
+  };
 
-noseOffsetY += (filterNoseYOffset[filterType] || 0) * finalScale;
+  noseOffsetY += (filterNoseYOffset[filterType] || 0) * finalScale;
 
-let noseWidth;
-if (filterType == 'dog') {
-  noseWidth = 90 * finalScale;
-} else if (filterType == 'cat') {
-  noseWidth = 210 * finalScale;
-} else if (filterType == 'mustache') {
-  noseWidth = 200 * finalScale;
-} else if (filterType == 'rabbid') {
-  noseWidth = 200 * finalScale;
-} else if (filterType == 'lorax') {
-  noseWidth = 410 * finalScale;
-} else if (filterType == 'woah') {
-  noseWidth = 300 * finalScale;
-} else {
-  noseWidth = 90 * finalScale;
-}
+  let noseWidth;
+  if (filterType == 'dog') {
+    noseWidth = 90 * finalScale;
+  } else if (filterType == 'cat') {
+    noseWidth = 210 * finalScale;
+  } else if (filterType == 'mustache') {
+    noseWidth = 200 * finalScale;
+  } else if (filterType == 'rabbid') {
+    noseWidth = 200 * finalScale;
+  } else if (filterType == 'lorax') {
+    noseWidth = 410 * finalScale;
+  } else if (filterType == 'woah') {
+    noseWidth = 300 * finalScale;
+  } else {
+    noseWidth = 90 * finalScale;
+  }
 
 
-let noseHeight;
-if (filterType == 'dog' || filterType == 'mustache') {
-  noseHeight = 65 * finalScale;
-} else if (filterType == 'cat') {
-  noseHeight = 120 * finalScale;
-} else if (filterType == 'rabbid') {
-  noseHeight = 200 * finalScale;
-} else if (filterType == 'lorax') {
-  noseHeight = 410 * finalScale;
-} else if (filterType == 'woah') {
-  noseHeight = 300 * finalScale;
-} else {
-  noseHeight = 65 * finalScale;
-}
+  let noseHeight;
+  if (filterType == 'dog' || filterType == 'mustache') {
+    noseHeight = 65 * finalScale;
+  } else if (filterType == 'cat') {
+    noseHeight = 120 * finalScale;
+  } else if (filterType == 'rabbid') {
+    noseHeight = 200 * finalScale;
+  } else if (filterType == 'lorax') {
+    noseHeight = 410 * finalScale;
+  } else if (filterType == 'woah') {
+    noseHeight = 300 * finalScale;
+  } else {
+    noseHeight = 65 * finalScale;
+  }
 
-if (filterType != 'minion' && filterType != 'shrek') {
-context.drawImage(
-  noseImg,
-  noseOffsetX - noseWidth / 2,
-  noseOffsetY - noseHeight / 2,
-  noseWidth,
-  noseHeight
-);
-}
+  if (filterType != 'minion' && filterType != 'shrek') {
+    context.drawImage(
+      noseImg,
+      noseOffsetX - noseWidth / 2,
+      noseOffsetY - noseHeight / 2,
+      noseWidth,
+      noseHeight
+    );
+  }
 
-context.restore();
+  context.restore();
 }
 
 function getVideoDisplayRect() {
@@ -1060,7 +1399,9 @@ function takePhoto() {
     return;
   }
 
-  const context = canvas.getContext('2d');
+  const context = canvas.getContext('2d', {
+    willReadFrequently: true
+  });
   const visible = getVisibleVideoRect();
 
   const width = visible.drawW;
@@ -1085,7 +1426,7 @@ function takePhoto() {
 
 
   context.drawImage(
-    cameraFeed,
+    glCanvas,
     visible.offsetX,   // source x
     visible.offsetY,   // source y
     visible.drawW,     // source width
@@ -1102,7 +1443,10 @@ function takePhoto() {
     });
   }
 
-  if (activeAnimatedFilter) {
+  if (
+    activeAnimatedFilter &&
+    ["sparkles", "snow", "hearts", "matrix"].includes(activeAnimatedFilter)
+  ) {
     drawAnimatedFilter(context);
   }
 
@@ -1138,13 +1482,6 @@ function takePhoto() {
     photo.addEventListener("transitionend", handleFadeEnd(), { once: true });
   }, 2000);
 
-  editorBaseImage = new Image();
-  editorBaseImage.onload = () => {
-    editorCanvas.style.display = "block";
-    stickers = [];
-    redrawEditorCanvas();
-  };
-  editorBaseImage.src = dataURL;
 }
 
 function downloadImage(dataURL, filename) {
@@ -1304,7 +1641,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 function syncOverlaySize() {
-  const rect = cameraFeed.getBoundingClientRect();
+  const rect = glCanvas.getBoundingClientRect();
   overlayCanvas.width = rect.width;
   overlayCanvas.height = rect.height;
 }

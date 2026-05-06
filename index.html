@@ -28,8 +28,12 @@
         <div style="display: flex;">
             <div id="mainDiv">
                 <div id="aboveFeed"> <i><u>P</u></i>hoto<i>B</i>ruh </div>
-                <div id="cameraWrapper">
-                    <video id="cameraFeed" autoplay style="background-color:black;width:1280px;height:720px;object-fit:cover;"></video>
+                <div id="cameraWrapper" style="position:relative;width:1280px;height:720px;overflow:hidden;">
+                    <video id="cameraFeed" autoplay playsinline muted
+                        style="position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;"></video>
+
+                    <canvas id="glCanvas" width="1280" height="720"
+                        style="position:absolute;top:0;left:0;width:1280px;height:720px;display:block;z-index:1;background:black;"></canvas>
                 </div>
                 <div id="countdown"></div>
                 <br>
