@@ -121,39 +121,37 @@ function capturePhotoToDataURL() {
   context.clearRect(0, 0, width, height);
   context.save();
 
-  if (mirrored) {
-    context.translate(width, 0);
-    context.scale(-1, 1);
-  }
-
   if (effectsManager.hasActiveEffects()) {
     context.filter = effectsManager.buildFilterString();
   }
 
-
   context.drawImage(
     glCanvas,
-    visible.offsetX,   // source x
-    visible.offsetY,   // source y
-    visible.drawW,     // source width
-    visible.drawH,     // source height
-    0,                 // destination x
-    0,                 // destination y
-    width,             // destination width
-    height             // destination height
+    visible.offsetX, visible.offsetY, visible.drawW, visible.drawH,
+    0, 0, width, height
   );
 
+  if (mirrored) {
+      context.save();
+      context.translate(width, 0);
+      context.scale(-1, 1);
+  }
+
   if (activeFaceFilter && trackedFaces.length) {
-    trackedFaces.forEach((face, i) => {
-      drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
-    });
+      trackedFaces.forEach((face, i) => {
+          drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
+      });
   }
 
   if (
-    activeAnimatedFilter &&
-    ["sparkles", "snow", "hearts", "matrix"].includes(activeAnimatedFilter)
+      activeAnimatedFilter &&
+      ["sparkles", "snow", "hearts", "matrix"].includes(activeAnimatedFilter)
   ) {
-    drawAnimatedFilter(context);
+      drawAnimatedFilter(context);
+  }
+
+  if (mirrored) {
+      context.restore();
   }
 
   context.restore();
@@ -237,23 +235,11 @@ function flashCaptureEffect() {
   }, 300);
 }
 
-function mapLandmarkToCanvas(point, video, canvas) {
-  const videoW = video.videoWidth;
-  const videoH = video.videoHeight;
+function mapLandmarkToCanvas(point, videoElement, canvas) {
+  const x = (point.x / cameraFeed.videoWidth) * canvas.width;
+  const y = (point.y / cameraFeed.videoHeight) * canvas.height;
 
-  if (!videoW || !videoH) {
-    return { x: 0, y: 0 };
-  }
-
-  // normalize landmark into video space
-  const nx = point.x / videoW;
-  const ny = point.y / videoH;
-
-  // map directly into overlay canvas space
-  return {
-    x: nx * canvas.width,
-    y: ny * canvas.height
-  };
+  return { x, y };
 }
 
 function getCurrentFace() {

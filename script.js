@@ -587,6 +587,8 @@ async function startCamera(facingMode = currentFacingMode) {
 
     mirrored = currentFacingMode === "user";
 
+    syncOverlayMirror();
+
     syncOverlaySize();
   } catch (error) {
     console.error("Error accessing camera:", error);
@@ -744,11 +746,6 @@ function renderOverlayLoop() {
   if (activeFaceFilter && trackedFaces.length) {
     overlayCtx.save();
 
-    if (mirrored) {
-      overlayCtx.translate(overlayCanvas.width, 0);
-      overlayCtx.scale(-1, 1);
-    }
-
     trackedFaces.forEach((face, i) => {
       drawFaceFilter(
         overlayCtx,
@@ -766,14 +763,7 @@ function renderOverlayLoop() {
   // Animated overlays (always independent)
   if (activeAnimatedFilter) {
     overlayCtx.save();
-
-    if (mirrored) {
-      overlayCtx.translate(overlayCanvas.width, 0);
-      overlayCtx.scale(-1, 1);
-    }
-
     drawAnimatedFilter(overlayCtx);
-
     overlayCtx.restore();
   }
 
@@ -807,6 +797,7 @@ function drawAnimatedFilter(ctx) {
 mirrorer.addEventListener('click', () => {
   soundManager.play("click");
   mirrored = !mirrored;
+  syncOverlayMirror();
 });
 
 // =========================
@@ -1046,28 +1037,25 @@ function getVisibleVideoRect() {
   const videoW = cameraFeed.videoWidth;
   const videoH = cameraFeed.videoHeight;
 
-  const rect = cameraFeed.getBoundingClientRect();
-  const displayW = rect.width;
-  const displayH = rect.height;
+  // Use actual render surface, not DOM CSS box
+  const displayW = glCanvas.width;
+  const displayH = glCanvas.height;
 
   const videoAspect = videoW / videoH;
   const displayAspect = displayW / displayH;
 
   let drawW, drawH, offsetX, offsetY;
 
-  // Video is wider than display → crop left/right
   if (videoAspect > displayAspect) {
+    // video wider than viewport
     drawH = videoH;
     drawW = videoH * displayAspect;
-
     offsetX = (videoW - drawW) / 2;
     offsetY = 0;
-  }
-  // Video is taller than display → crop top/bottom
-  else {
+  } else {
+    // video taller than viewport
     drawW = videoW;
     drawH = videoW / displayAspect;
-
     offsetX = 0;
     offsetY = (videoH - drawH) / 2;
   }
@@ -1140,7 +1128,7 @@ function drawFaceFilter(context, detection, videoElement, transform, filterType,
   const dx = rightEye.x - leftEye.x;
   const dy = rightEye.y - leftEye.y;
 
-  const angle = Math.atan2(dy, dx);
+  let angle = Math.atan2(dy, dx);
 
   const faceWidth = Math.abs(jawRight.x - jawLeft.x);
 
@@ -1394,29 +1382,27 @@ function drawMatrix(ctx) {
 // =========================
 function takePhoto() {
   if (cameraFeed.videoWidth === 0 || cameraFeed.videoHeight === 0) {
-    console.error('Video not ready yet');
+    console.error("Video not ready yet");
     soundManager.play("error");
     return;
   }
 
-  const context = canvas.getContext('2d', {
+  const context = canvas.getContext("2d", {
     willReadFrequently: true
   });
+
   const visible = getVisibleVideoRect();
 
-  const width = visible.drawW;
-  const height = visible.drawH;
+  // Final saved image should match visible preview aspect
+  const outputWidth = 1280;
+  const outputHeight = Math.round(outputWidth * (visible.displayH / visible.displayW));
 
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
 
-  context.clearRect(0, 0, width, height);
+  context.clearRect(0, 0, outputWidth, outputHeight);
   context.save();
 
-  if (mirrored) {
-    context.translate(width, 0);
-    context.scale(-1, 1);
-  }
 
   if (effectsManager.hasActiveEffects()) {
     context.filter = effectsManager.buildFilterString();
@@ -1424,30 +1410,34 @@ function takePhoto() {
 
   soundManager.play("shutter");
 
-
   context.drawImage(
     glCanvas,
-    visible.offsetX,   // source x
-    visible.offsetY,   // source y
-    visible.drawW,     // source width
-    visible.drawH,     // source height
-    0,                 // destination x
-    0,                 // destination y
-    width,             // destination width
-    height             // destination height
+    visible.offsetX, visible.offsetY, visible.drawW, visible.drawH,
+    0, 0, outputWidth, outputHeight
   );
 
+  // Mirror the filter layer to match the mirrored base image
+  if (mirrored) {
+      context.save();
+      context.translate(outputWidth, 0);
+      context.scale(-1, 1);
+  }
+
   if (activeFaceFilter && trackedFaces.length) {
-    trackedFaces.forEach((face, i) => {
-      drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
-    });
+      trackedFaces.forEach((face, i) => {
+          drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
+      });
   }
 
   if (
-    activeAnimatedFilter &&
-    ["sparkles", "snow", "hearts", "matrix"].includes(activeAnimatedFilter)
+      activeAnimatedFilter &&
+      ["sparkles", "snow", "hearts", "matrix"].includes(activeAnimatedFilter)
   ) {
-    drawAnimatedFilter(context);
+      drawAnimatedFilter(context);
+  }
+
+  if (mirrored) {
+      context.restore();
   }
 
   context.restore();
@@ -1462,6 +1452,12 @@ function takePhoto() {
     photo.src = objectURL;
     photo.style.display = "block";
     photo.style.opacity = "1";
+
+    const testImg = new Image();
+    testImg.onload = () => {
+      console.log("Captured size:", testImg.naturalWidth, testImg.naturalHeight);
+    };
+    testImg.src = objectURL;
 
     await addPhotoToDB(blob, "photo");
 
@@ -1638,12 +1634,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   await migrateLocalStorageToIndexedDB();
   await displayTakenPhotos();
   await updatePhotoCounter();
+  syncOverlayMirror();
 });
 
 function syncOverlaySize() {
   const rect = glCanvas.getBoundingClientRect();
   overlayCanvas.width = rect.width;
   overlayCanvas.height = rect.height;
+}
+
+// In script.js
+
+function syncOverlayMirror() {
+  overlayCanvas.style.transform = mirrored ? "scaleX(-1)" : "scaleX(1)";
 }
 
 window.addEventListener("resize", syncOverlaySize);
