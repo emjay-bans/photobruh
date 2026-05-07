@@ -24,23 +24,27 @@ const downloadStripBtn = document.getElementById("downloadStripBtn");
 downloadStripBtn.disabled = true;
 
 // Start strip capture mode
-photoStripBtn.addEventListener("click", () => {
-  if (stripModeEnabled) return;
+if (photoStripBtn) {
+  photoStripBtn.addEventListener("click", () => {
+    if (stripModeEnabled) return;
 
-  stripModeEnabled = true;
-  photoStripImages = [];
-  latestPhotoStrip = null;
-  downloadStripBtn.disabled = true;
+    stripModeEnabled = true;
+    photoStripImages = [];
+    latestPhotoStrip = null;
+    downloadStripBtn.disabled = true;
 
-  startPhotoStripCapture();
-});
+    startPhotoStripCapture();
+  });
+}
 
 // Download generated strip
-downloadStripBtn.addEventListener("click", () => {
-  soundManager.play("click");
-  downloadPhotoStrip();
-  soundManager.play("success");
-});
+if (downloadStripBtn) {
+  downloadStripBtn.addEventListener("click", () => {
+    soundManager.play("click");
+    downloadPhotoStrip();
+    soundManager.play("success");
+  });
+}
 
 // =========================
 // PHOTO STRIP CAPTURE FLOW
@@ -175,6 +179,9 @@ function buildPhotoStrip(images) {
     latestPhotoStrip = stripURL;
 
     await addPhotoToDB(blob, "strip");
+
+    await displayTakenPhotos();
+    await updatePhotoCounter();
 
     photo.src = stripURL;
     photo.style.display = "block";

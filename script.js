@@ -1071,30 +1071,33 @@ switchCameraBtn.addEventListener("click", async () => {
 // =========================
 // SNAP COUNTDOWN
 // =========================
-snap.addEventListener('click', () => {
-  soundManager.play("click");
-  soundManager.play("tick");
-  isBooth = false;
-  let timeLeft = 3;
+if (snap) {
+  snap.addEventListener('click', () => {
+    soundManager.play("click");
+    soundManager.play("tick");
+    isBooth = false;
+    let timeLeft = 3;
 
-  countdown.style.display = "flex";
-  countdown.textContent = timeLeft;
+    countdown.style.display = "flex";
+    countdown.textContent = timeLeft;
 
-  snap.disabled = true;
+    snap.disabled = true;
 
-  const timer = setInterval(() => {
-    timeLeft--;
+    const timer = setInterval(() => {
+      timeLeft--;
 
-    if (timeLeft > 0) {
-      countdown.textContent = timeLeft;
-    } else {
-      clearInterval(timer);
-      countdown.style.display = "none";
-      takePhoto();
-      snap.disabled = false;
-    }
-  }, 1000);
-});
+      if (timeLeft > 0) {
+        countdown.textContent = timeLeft;
+      } else {
+        clearInterval(timer);
+        countdown.style.display = "none";
+        takePhoto();
+        snap.disabled = false;
+      }
+    }, 1000);
+  });
+}
+
 
 // =========================
 // FILTER TOGGLE
@@ -1299,11 +1302,13 @@ function resetAnimatedFilterState() {
 // =========================
 // EFFECTS PANEL TOGGLE
 // =========================
-effects.addEventListener('click', () => {
-  soundManager.play("click");
-  const effectsList = document.getElementById('effectsList');
-  effectsList.style.display = effectsList.style.display === 'block' ? 'none' : 'block';
-});
+if (effects) {
+  effects.addEventListener('click', () => {
+    soundManager.play("click");
+    const effectsList = document.getElementById('effectsList');
+    effectsList.style.display = effectsList.style.display === 'block' ? 'none' : 'block';
+  });
+}
 
 function getVisibleVideoRect() {
   const videoW = cameraFeed.videoWidth;
@@ -1784,14 +1789,19 @@ function downloadEditedPhoto() {
   soundManager.play("success");
 }
 
-document.getElementById("downloadOriginalBtn").addEventListener("click", () => {
-  soundManager.play("click");
-  downloadOriginalPhoto();
-});
-document.getElementById("downloadEditedBtn").addEventListener("click", () => {
-  soundManager.play("click");
-  downloadEditedPhoto();
-});
+if (document.getElementById("downloadOriginalBtn")) {
+  document.getElementById("downloadOriginalBtn").addEventListener("click", () => {
+    soundManager.play("click");
+    downloadOriginalPhoto();
+  });
+}
+
+if (document.getElementById("downloadEditedBtn")) {
+  document.getElementById("downloadEditedBtn").addEventListener("click", () => {
+    soundManager.play("click");
+    downloadEditedPhoto();
+  });
+}
 
 function handleFadeEnd() {
   photo.classList.remove("fade-out");
@@ -1872,9 +1882,12 @@ function closePhotoModal() {
   modalImg.src = "";
 }
 
-document.getElementById("modalImage").addEventListener("click", (e) => {
-  e.stopPropagation();
-});
+if (document.getElementById("modalImage")){
+  document.getElementById("modalImage").addEventListener("click", (e) => {
+    e.stopPropagation();
+  });
+}
+
 
 // =========================
 // THEME TOGGLE

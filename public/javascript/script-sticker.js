@@ -1,6 +1,8 @@
 const editorCanvas = document.getElementById("editorCanvas");
 const placeholder = document.getElementById("placeholder");
-const editorCtx = editorCanvas.getContext("2d");
+if (editorCanvas) {
+  const editorCtx = editorCanvas.getContext("2d");
+}
 
 let editorBaseImage = null;
 let editorObjects = [];
@@ -155,225 +157,224 @@ function getObjectBounds(obj) {
     centerY: obj.y + obj.height / 2
   };
 }
+if (editorCanvas) {
+  editorCanvas.addEventListener("mousedown", (e) => {
+    const rect = editorCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
 
-editorCanvas.addEventListener("mousedown", (e) => {
-  const rect = editorCanvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
+    activeSticker = null;
+    interactionMode = null;
 
-  activeSticker = null;
-  interactionMode = null;
+    for (let i = editorObjects.length - 1; i >= 0; i--) {
+      const s = editorObjects[i];
+      const b = getObjectBounds(s);
 
-  for (let i = editorObjects.length - 1; i >= 0; i--) {
-    const s = editorObjects[i];
-    const b = getObjectBounds(s);
+      // delete handle
+      if (
+        mx >= b.left - HANDLE_SIZE / 2 &&
+        mx <= b.left + HANDLE_SIZE / 2 &&
+        my >= b.top - HANDLE_SIZE / 2 &&
+        my <= b.top + HANDLE_SIZE / 2
+      ) {
+        soundManager.play("delete");
+        editorObjects.splice(i, 1);
+        redrawEditorCanvas();
+        return;
+      }
 
-    // delete handle
-    if (
-      mx >= b.left - HANDLE_SIZE / 2 &&
-      mx <= b.left + HANDLE_SIZE / 2 &&
-      my >= b.top - HANDLE_SIZE / 2 &&
-      my <= b.top + HANDLE_SIZE / 2
-    ) {
-      soundManager.play("delete");
-      editorObjects.splice(i, 1);
-      redrawEditorCanvas();
-      return;
+      // rotate handle
+      if (
+        mx >= b.centerX - HANDLE_SIZE / 2 &&
+        mx <= b.centerX + HANDLE_SIZE / 2 &&
+        my >= b.top - 30 &&
+        my <= b.top - 30 + HANDLE_SIZE
+      ) {
+        activeSticker = s;
+        interactionMode = "rotate";
+        return;
+      }
+
+      // resize handle
+      if (
+        mx >= b.right - HANDLE_SIZE &&
+        mx <= b.right + HANDLE_SIZE &&
+        my >= b.bottom - HANDLE_SIZE &&
+        my <= b.bottom + HANDLE_SIZE
+      ) {
+        activeSticker = s;
+        interactionMode = "resize";
+        return;
+      }
+
+      // move
+      if (
+        mx >= b.left &&
+        mx <= b.right &&
+        my >= b.top &&
+        my <= b.bottom
+      ) {
+        activeSticker = s;
+        interactionMode = "move";
+        dragOffsetX = mx - s.x;
+        dragOffsetY = my - s.y;
+        redrawEditorCanvas();
+        return;
+      }
     }
 
-    // rotate handle
-    if (
-      mx >= b.centerX - HANDLE_SIZE / 2 &&
-      mx <= b.centerX + HANDLE_SIZE / 2 &&
-      my >= b.top - 30 &&
-      my <= b.top - 30 + HANDLE_SIZE
-    ) {
-      activeSticker = s;
-      interactionMode = "rotate";
-      return;
+    redrawEditorCanvas();
+  });
+
+  editorCanvas.addEventListener("mousemove", (e) => {
+    if (!activeSticker || !interactionMode) return;
+
+    const rect = editorCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (interactionMode === "move") {
+      activeSticker.x = mx - dragOffsetX;
+      activeSticker.y = my - dragOffsetY;
     }
 
-    // resize handle
-    if (
-      mx >= b.right - HANDLE_SIZE &&
-      mx <= b.right + HANDLE_SIZE &&
-      my >= b.bottom - HANDLE_SIZE &&
-      my <= b.bottom + HANDLE_SIZE
-    ) {
-      activeSticker = s;
-      interactionMode = "resize";
-      return;
+    else if (interactionMode === "resize") {
+      activeSticker.width = Math.max(40, mx - activeSticker.x);
+      activeSticker.height = Math.max(40, my - activeSticker.y);
+
+      if (activeSticker.type === "text") {
+        activeSticker.fontSize = Math.max(20, activeSticker.height * 0.8);
+      }
     }
 
-    // move
-    if (
-      mx >= b.left &&
-      mx <= b.right &&
-      my >= b.top &&
-      my <= b.bottom
-    ) {
-      activeSticker = s;
-      interactionMode = "move";
-      dragOffsetX = mx - s.x;
-      dragOffsetY = my - s.y;
-      redrawEditorCanvas();
-      return;
+    else if (interactionMode === "rotate") {
+      const cx = activeSticker.x + activeSticker.width / 2;
+      const cy = activeSticker.y + activeSticker.height / 2;
+      activeSticker.rotation = Math.atan2(my - cy, mx - cx);
     }
-  }
 
-  redrawEditorCanvas();
-});
+    redrawEditorCanvas();
+  });
 
-
-editorCanvas.addEventListener("mousemove", (e) => {
-  if (!activeSticker || !interactionMode) return;
-
-  const rect = editorCanvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-
-  if (interactionMode === "move") {
-    activeSticker.x = mx - dragOffsetX;
-    activeSticker.y = my - dragOffsetY;
-  }
-
-  else if (interactionMode === "resize") {
-    activeSticker.width = Math.max(40, mx - activeSticker.x);
-    activeSticker.height = Math.max(40, my - activeSticker.y);
-
-    if (activeSticker.type === "text") {
-      activeSticker.fontSize = Math.max(20, activeSticker.height * 0.8);
-    }
-  }
-
-  else if (interactionMode === "rotate") {
-    const cx = activeSticker.x + activeSticker.width / 2;
-    const cy = activeSticker.y + activeSticker.height / 2;
-    activeSticker.rotation = Math.atan2(my - cy, mx - cx);
-  }
-
-  redrawEditorCanvas();
-});
-
-
-editorCanvas.addEventListener("mouseup", () => {
-  interactionMode = null;
-});
+  editorCanvas.addEventListener("mouseup", () => {
+    interactionMode = null;
+  });
 
 //TOUCH
 
+  editorCanvas.addEventListener("touchstart", (e) => {
+    e.preventDefault();
 
-editorCanvas.addEventListener("touchstart", (e) => {
-  e.preventDefault();
+    const rect = editorCanvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    const mx = touch.clientX - rect.left;
+    const my = touch.clientY - rect.top;
 
-  const rect = editorCanvas.getBoundingClientRect();
-  const touch = e.touches[0];
-  const mx = touch.clientX - rect.left;
-  const my = touch.clientY - rect.top;
+    activeSticker = null;
+    interactionMode = null;
 
-  activeSticker = null;
-  interactionMode = null;
+    for (let i = editorObjects.length - 1; i >= 0; i--) {
+      const s = editorObjects[i];
+      const b = getObjectBounds(s);
 
-  for (let i = editorObjects.length - 1; i >= 0; i--) {
-    const s = editorObjects[i];
-    const b = getObjectBounds(s);
+      // delete handle
+      if (
+        mx >= b.left - HANDLE_SIZE / 2 &&
+        mx <= b.left + HANDLE_SIZE / 2 &&
+        my >= b.top - HANDLE_SIZE / 2 &&
+        my <= b.top + HANDLE_SIZE / 2
+      ) {
+        soundManager.play("delete");
+        editorObjects.splice(i, 1);
+        redrawEditorCanvas();
+        return;
+      }
 
-    // delete handle
-    if (
-      mx >= b.left - HANDLE_SIZE / 2 &&
-      mx <= b.left + HANDLE_SIZE / 2 &&
-      my >= b.top - HANDLE_SIZE / 2 &&
-      my <= b.top + HANDLE_SIZE / 2
-    ) {
-      soundManager.play("delete");
-      editorObjects.splice(i, 1);
-      redrawEditorCanvas();
-      return;
+      // rotate handle
+      if (
+        mx >= b.centerX - HANDLE_SIZE / 2 &&
+        mx <= b.centerX + HANDLE_SIZE / 2 &&
+        my >= b.top - 30 &&
+        my <= b.top - 30 + HANDLE_SIZE
+      ) {
+        activeSticker = s;
+        interactionMode = "rotate";
+        redrawEditorCanvas();
+        return;
+      }
+
+      // resize handle
+      if (
+        mx >= b.right - HANDLE_SIZE &&
+        mx <= b.right + HANDLE_SIZE &&
+        my >= b.bottom - HANDLE_SIZE &&
+        my <= b.bottom + HANDLE_SIZE
+      ) {
+        activeSticker = s;
+        interactionMode = "resize";
+        redrawEditorCanvas();
+        return;
+      }
+
+      // move
+      if (
+        mx >= b.left &&
+        mx <= b.right &&
+        my >= b.top &&
+        my <= b.bottom
+      ) {
+        activeSticker = s;
+        interactionMode = "move";
+        dragOffsetX = mx - s.x;
+        dragOffsetY = my - s.y;
+        redrawEditorCanvas();
+        return;
+      }
     }
 
-    // rotate handle
-    if (
-      mx >= b.centerX - HANDLE_SIZE / 2 &&
-      mx <= b.centerX + HANDLE_SIZE / 2 &&
-      my >= b.top - 30 &&
-      my <= b.top - 30 + HANDLE_SIZE
-    ) {
-      activeSticker = s;
-      interactionMode = "rotate";
-      redrawEditorCanvas();
-      return;
+    redrawEditorCanvas();
+  }, { passive: false });
+
+
+  editorCanvas.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    if (!activeSticker || !interactionMode) return;
+
+    const rect = editorCanvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    const mx = touch.clientX - rect.left;
+    const my = touch.clientY - rect.top;
+
+    if (interactionMode === "move") {
+      activeSticker.x = mx - dragOffsetX;
+      activeSticker.y = my - dragOffsetY;
     }
 
-    // resize handle
-    if (
-      mx >= b.right - HANDLE_SIZE &&
-      mx <= b.right + HANDLE_SIZE &&
-      my >= b.bottom - HANDLE_SIZE &&
-      my <= b.bottom + HANDLE_SIZE
-    ) {
-      activeSticker = s;
-      interactionMode = "resize";
-      redrawEditorCanvas();
-      return;
+    else if (interactionMode === "resize") {
+      activeSticker.width = Math.max(40, mx - activeSticker.x);
+      activeSticker.height = Math.max(40, my - activeSticker.y);
+
+      if (activeSticker.type === "text") {
+        activeSticker.fontSize = Math.max(20, activeSticker.height * 0.8);
+      }
     }
 
-    // move
-    if (
-      mx >= b.left &&
-      mx <= b.right &&
-      my >= b.top &&
-      my <= b.bottom
-    ) {
-      activeSticker = s;
-      interactionMode = "move";
-      dragOffsetX = mx - s.x;
-      dragOffsetY = my - s.y;
-      redrawEditorCanvas();
-      return;
+    else if (interactionMode === "rotate") {
+      const cx = activeSticker.x + activeSticker.width / 2;
+      const cy = activeSticker.y + activeSticker.height / 2;
+      activeSticker.rotation = Math.atan2(my - cy, mx - cx);
     }
-  }
 
-  redrawEditorCanvas();
-}, { passive: false });
-
-
-editorCanvas.addEventListener("touchmove", (e) => {
-  e.preventDefault();
-  if (!activeSticker || !interactionMode) return;
-
-  const rect = editorCanvas.getBoundingClientRect();
-  const touch = e.touches[0];
-  const mx = touch.clientX - rect.left;
-  const my = touch.clientY - rect.top;
-
-  if (interactionMode === "move") {
-    activeSticker.x = mx - dragOffsetX;
-    activeSticker.y = my - dragOffsetY;
-  }
-
-  else if (interactionMode === "resize") {
-    activeSticker.width = Math.max(40, mx - activeSticker.x);
-    activeSticker.height = Math.max(40, my - activeSticker.y);
-
-    if (activeSticker.type === "text") {
-      activeSticker.fontSize = Math.max(20, activeSticker.height * 0.8);
-    }
-  }
-
-  else if (interactionMode === "rotate") {
-    const cx = activeSticker.x + activeSticker.width / 2;
-    const cy = activeSticker.y + activeSticker.height / 2;
-    activeSticker.rotation = Math.atan2(my - cy, mx - cx);
-  }
-
-  redrawEditorCanvas();
-}, { passive: false });
+    redrawEditorCanvas();
+  }, { passive: false });
 
 
-editorCanvas.addEventListener("touchend", (e) => {
-  e.preventDefault();
-  interactionMode = null;
-}, { passive: false });
+  editorCanvas.addEventListener("touchend", (e) => {
+    e.preventDefault();
+    interactionMode = null;
+  }, { passive: false });
+
+}
 
 function saveEditedPhoto() {
   const finalImage = editorCanvas.toDataURL("image/png");

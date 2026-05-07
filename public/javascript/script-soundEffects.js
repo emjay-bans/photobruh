@@ -47,6 +47,8 @@ muteBtn.addEventListener("click", () => {
   muteBtn.textContent = soundManager.enabled ? "Sound: On" : "Sound: Off";
 });
 
-document.getElementById("volumeSlider").addEventListener("input", (e) => {
-  soundManager.setVolume(e.target.value / 100);
-});
+if (document.getElementById("volumeSlider")) {
+  document.getElementById("volumeSlider").addEventListener("input", (e) => {
+    soundManager.setVolume(e.target.value / 100);
+  });
+}

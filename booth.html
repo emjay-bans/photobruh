@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PhotoBruh Booth</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="public/assets/favicon.png">
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js/dist/face-api.min.js"></script>
+  <style>
+    /* Clean booth styling */
+    body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+      font-family: 'Segoe UI', sans-serif;
+    }
+
+    #loadingScreen {
+      background: #000;
+      color: #fff;
+    }
+
+    #loadingWindow {
+      border: 2px solid #c0c0c0;
+      background: #000080;
+      color: white;
+      padding: 20px;
+      text-align: left;
+    }
+
+    .boot-line {
+      font-family: 'Courier New', monospace;
+      color: #c0c0c0;
+    }
+
+    #boothContainer {
+      position: relative;
+      width: 1280px;
+      max-width: 100vw;
+      height: 90vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #cameraWrapper {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1280 / 720;
+      max-height: 70vh;
+      background: #111;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 0 30px rgba(255,255,255,0.1);
+    }
+
+    video, canvas {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    #countdown {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 120px;
+      font-weight: bold;
+      color: white;
+      text-shadow: 0 0 20px black;
+      z-index: 10;
+      display: none;
+    }
+
+    #buttonZone {
+      margin-top: 25px;
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .booth-btn {
+      font-size: 24px;
+      padding: 18px 40px;
+      border: none;
+      border-radius: 50px;
+      background: #ff4081;
+      color: white;
+      cursor: pointer;
+      transition: 0.2s;
+      box-shadow: 0 4px 15px rgba(255,64,129,0.5);
+    }
+
+    .booth-btn:active {
+      transform: scale(0.97);
+    }
+
+    .booth-btn:disabled {
+      background: #555;
+      box-shadow: none;
+      cursor: default;
+    }
+
+    /* Full‑screen strip overlay (screen view) */
+    #stripOverlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.85);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+
+    #stripImagesRow {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .stripPrintImg {
+        max-width: 90%;       /* allow up to 90% of the screen width */
+        max-height: 90vh;     /* allow up to 90% of the screen height */
+        border-radius: 12px;
+        box-shadow: 0 0 40px rgba(255,255,255,0.3);
+        object-fit: contain;  /* keep proportions */
+    }
+
+    .screen-hide {
+      display: none;
+    }
+
+    #overlayMessage {
+      color: white;
+      margin-top: 20px;
+      font-size: 20px;
+    }
+
+    #statusText {
+      color: #fff;
+      font-size: 22px;
+      margin-top: 10px;
+    }
+
+    /* ---------- ADMIN SETTINGS PANEL ---------- */
+    #settingsBtn {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      z-index: 100;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid rgba(255,255,255,0.3);
+      color: white;
+      font-size: 30px;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: 0.2s;
+    }
+    #settingsBtn:hover {
+      background: rgba(255,255,255,0.2);
+    }
+
+    #settingsOverlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 10000;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    #settingsPanel {
+      background: #1e1e1e;
+      border-radius: 16px;
+      padding: 25px;
+      max-width: 700px;
+      width: 90%;
+      color: white;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    #settingsPanel h3 {
+      margin-top: 15px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #444;
+      padding-bottom: 5px;
+    }
+
+    .fx-btn-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .fx-btn {
+      background: #333;
+      border: none;
+      color: white;
+      padding: 10px 18px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: 0.2s;
+    }
+    .fx-btn:hover {
+      background: #ff4081;
+    }
+    .fx-btn.active {
+      background: #ff4081;
+      box-shadow: 0 0 10px #ff4081;
+    }
+
+    #closeSettingsBtn {
+      background: #555;
+      color: white;
+      border: none;
+      padding: 12px 30px;
+      border-radius: 30px;
+      font-size: 18px;
+      cursor: pointer;
+      margin-top: 20px;
+      display: block;
+      width: fit-content;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    /* ---------- PRINT STYLES (two small strips per portrait sheet) ---------- */
+    @media print {
+      @page {
+        size: portrait;
+        margin: 0.5in;
+      }
+
+      body * {
+        visibility: hidden;
+      }
+
+      #stripOverlay,
+      #stripOverlay * {
+        visibility: visible;
+      }
+
+      #stripOverlay {
+        display: flex !important;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: white;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        z-index: 99999;
+      }
+
+      #stripImagesRow {
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        gap: 0.5in;
+      }
+
+      .stripPrintImg {
+        width: 2in;
+        height: 6in;
+        object-fit: contain;
+        border-radius: 0;
+        box-shadow: none;
+      }
+
+      .screen-hide {
+        display: block;
+      }
+
+      #overlayMessage {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="loadingScreen">
+    <div id="loadingWindow">
+      <div id="loadingTitleBar">PhotoBruh Booth</div>
+      <div id="loadingContent">
+        <p class="boot-line" id="boot1">[ ] Initializing Camera...</p>
+        <p class="boot-line" id="boot2">[ ] Loading Face Tracker...</p>
+        <p class="boot-line" id="boot3">[ ] Loading Filters...</p>
+        <p class="boot-line" id="boot4">[ ] Starting PhotoBruh...</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="boothContainer">
+    <!-- Settings gear button (operator only) -->
+    <button id="settingsBtn" title="Filter Settings">⚙️</button>
+
+    <div id="cameraWrapper">
+      <video id="cameraFeed" autoplay playsinline muted style="position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;"></video>
+      <canvas id="glCanvas" width="1280" height="720"
+        style="position:absolute;top:0;left:0;width:100%;height:100%;display:block;background:black;"></canvas>
+      <div id="countdown"></div>
+    </div>
+
+    <div id="buttonZone">
+      <button id="startStripBtn" class="booth-btn">📸 Start Photo Strip</button>
+      <button id="downloadBoothBtn" class="booth-btn" style="display:none;">⬇️ Download Strip</button>
+      <button id="printBoothBtn" class="booth-btn" style="display:none;">🖨️ Print Strip</button>
+    </div>
+
+    <div id="statusText" style="font-family: 'Dos';"></div>
+
+    <!-- Full‑screen strip overlay for finished strip -->
+    <div id="stripOverlay">
+      <div id="stripImagesRow">
+        <img id="stripOverlayImg1" class="stripPrintImg">
+        <img id="stripOverlayImg2" class="stripPrintImg screen-hide">
+      </div>
+      <p id="overlayMessage">Your photo strip will disappear in a few seconds…</p>
+    </div>
+
+    <!-- Settings overlay (hidden by default) -->
+    <div id="settingsOverlay">
+      <div id="settingsPanel">
+        <h3 style="margin-top:0;">🎨 Visual Filters</h3>
+        <div class="fx-btn-grid" id="visualPresetBtns">
+          <button class="fx-btn" data-preset="bw">B&W</button>
+          <button class="fx-btn" data-preset="sepia">Sepia</button>
+          <button class="fx-btn" data-preset="cool">Cool</button>
+          <button class="fx-btn" data-preset="warm">Warm</button>
+          <button class="fx-btn" data-preset="night">Night</button>
+          <button class="fx-btn" data-preset="vivid">Vivid</button>
+          <button class="fx-btn" data-preset="reset">Reset</button>
+        </div>
+
+        <h3>😺 Face Filter</h3>
+        <div class="fx-btn-grid" id="faceFilterBtns">
+          <button class="fx-btn" data-filter="dog">Dog</button>
+          <button class="fx-btn" data-filter="cat">Cat</button>
+          <button class="fx-btn" data-filter="mustache">Mustache</button>
+          <button class="fx-btn" data-filter="rabbid">Rabbid</button>
+          <button class="fx-btn" data-filter="lorax">Lorax</button>
+          <button class="fx-btn" data-filter="minion">Minion</button>
+          <button class="fx-btn" data-filter="woah">Woah</button>
+          <button class="fx-btn" data-filter="shrek">Shrek</button>
+          <button class="fx-btn" data-filter="none">Clear</button>
+        </div>
+
+        <h3>✨ Animated Filter</h3>
+        <div class="fx-btn-grid" id="animatedFilterBtns">
+          <button class="fx-btn" data-anim="none">None</button>
+          <button class="fx-btn" data-anim="scanlines">Scanlines</button>
+          <button class="fx-btn" data-anim="sparkles">Sparkles</button>
+          <button class="fx-btn" data-anim="snow">Snow</button>
+          <button class="fx-btn" data-anim="hearts">Hearts</button>
+          <button class="fx-btn" data-anim="matrix">Matrix</button>
+        </div>
+
+        <h3>🪞 Mirror</h3>
+        <button id="mirrorToggleBtn" class="fx-btn">Toggle Mirror (currently: ON)</button>
+
+        <button id="closeSettingsBtn">Close Settings</button>
+      </div>
+    </div>
+
+    <!-- Hidden elements required by the other scripts -->
+    <div style="display:none">
+      <canvas id="preview"></canvas>
+      <img id="photo">
+      <div id="effectsList"></div>
+      <div id="photoModal">
+        <span class="close-modal">&times;</span>
+        <img id="modalImage" class="modal-image">
+      </div>
+      <div id="photoContainer"></div>
+      <button id="effects"></button>
+      <button id="mirrorer"></button>
+      <button id="switchCameraBtn"></button>
+      <button id="muteBtn"></button>
+      <button id="themeBtn"></button>
+      <button id="faceWarpToggleBtn"></button>
+      <button id="snap"></button>
+      <button id="photoStripBtn"></button>
+      <input type="range" id="distortStrengthSlider">
+      <input type="range" id="graySlider">
+      <input type="range" id="brightSlider">
+      <input type="range" id="blurSlider">
+      <input type="range" id="contrastSlider">
+      <input type="range" id="hueSlider">
+      <input type="range" id="invertSlider">
+      <input type="range" id="saturSlider">
+      <input type="range" id="sepiaSlider">
+      <div id="photoCounter"></div>
+      <button id="downloadStripBtn"></button>
+    </div>
+  </div>
+
+  <script>
+    // =====================================
+    // BOOTH CONFIGURATION – default effects (overridden by settings panel)
+    // =====================================
+    const defaultFaceFilter = null;          // e.g., 'dog'
+    const defaultAnimatedFilter = null;      // e.g., 'hearts'
+    const defaultMirrored = true;
+    const defaultVisualPreset = null;        // e.g., 'warm'
+
+    // ---------- STRIP TEMPLATE ----------
+    const BOOTH_TEMPLATE = {
+      footerText: "PhotoBruh",
+      footerColor: "#008081",
+      backgroundColor: "#ffffff",
+      frameCount: 4,
+      frameHeight: 400,
+      padding: 20,
+      stripWidth: 600
+    };
+    // =====================================
+
+    // Prevent errors from missing modal/gallery functions
+    document.addEventListener('DOMContentLoaded', () => {
+      if (!document.getElementById('photoModal')) {
+        window.openPhotoModal = function(){};
+        window.closePhotoModal = function(){};
+      }
+      if (typeof displayTakenPhotos === 'function') {
+        window.displayTakenPhotos = function(){};
+      }
+    });
+  </script>
+
+  <script defer src="script.js"></script>
+  <script defer src="public/javascript/script-sticker.js"></script>
+  <script defer src="public/javascript/script-boothStrip.js"></script>
+  <script defer src="public/javascript/script-soundEffects.js"></script>
+
+  <script>
+    // =====================================
+    // BOOTH CUSTOM LOGIC + SETTINGS PANEL
+    // =====================================
+    window.addEventListener('DOMContentLoaded', () => {
+      stripShotCount = BOOTH_TEMPLATE.frameCount;
+      
+      const startBtn = document.getElementById('startStripBtn');
+      const downloadBoothBtn = document.getElementById('downloadBoothBtn');
+      const printBoothBtn = document.getElementById('printBoothBtn');
+      const stripOverlay = document.getElementById('stripOverlay');
+      const stripImg1 = document.getElementById('stripOverlayImg1');
+      const stripImg2 = document.getElementById('stripOverlayImg2');
+      const overlayMessage = document.getElementById('overlayMessage');
+      const status = document.getElementById('statusText');
+      const settingsBtn = document.getElementById('settingsBtn');
+      const settingsOverlay = document.getElementById('settingsOverlay');
+      const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+      const mirrorToggleBtn = document.getElementById('mirrorToggleBtn');
+
+      // =====================
+      // APPLY DEFAULT FILTERS (after scripts are loaded)
+      // =====================
+      function applyDefaults() {
+        if (defaultVisualPreset && typeof effectsManager !== 'undefined') {
+          effectsManager.applyPreset(defaultVisualPreset);
+        }
+        if (typeof syncOverlayMirror === 'function') {
+          mirrored = defaultMirrored;
+          syncOverlayMirror();
+        }
+        // directly update the global filter variables used by the render loop
+        activeFaceFilter = defaultFaceFilter;
+        activeAnimatedFilter = defaultAnimatedFilter;
+      }
+
+      // =====================
+      // SETTINGS PANEL LOGIC
+      // =====================
+      settingsBtn.addEventListener('click', () => {
+        soundManager.play('click');
+        settingsOverlay.style.display = 'flex';
+      });
+
+      closeSettingsBtn.addEventListener('click', () => {
+        settingsOverlay.style.display = 'none';
+      });
+
+      settingsOverlay.addEventListener('click', (e) => {
+        if (e.target === settingsOverlay) {
+          settingsOverlay.style.display = 'none';
+        }
+      });
+
+      function setActiveButton(containerId, value, dataAttr) {
+        const container = document.getElementById(containerId);
+        container.querySelectorAll('.fx-btn').forEach(btn => {
+          btn.classList.remove('active');
+          if (btn.dataset[dataAttr] === value) {
+            btn.classList.add('active');
+          }
+        });
+      }
+
+      // Visual presets
+      document.querySelectorAll('#visualPresetBtns .fx-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const preset = btn.dataset.preset;
+          if (preset === 'reset') {
+            effectsManager.reset();
+          } else {
+            effectsManager.applyPreset(preset);
+          }
+          setActiveButton('visualPresetBtns', preset, 'preset');
+        });
+      });
+
+      // Face filters (now directly updates the global variable)
+      document.querySelectorAll('#faceFilterBtns .fx-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const filter = btn.dataset.filter;
+          activeFaceFilter = (filter === 'none') ? null : filter;
+          setActiveButton('faceFilterBtns', filter, 'filter');
+        });
+      });
+
+      // Animated filters (directly updates global and resets animation state)
+      document.querySelectorAll('#animatedFilterBtns .fx-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const anim = btn.dataset.anim;
+          activeAnimatedFilter = (anim === 'none') ? null : anim;
+          if (typeof resetAnimatedFilterState === 'function') resetAnimatedFilterState();
+          setActiveButton('animatedFilterBtns', anim, 'anim');
+        });
+      });
+
+      // Mirror toggle
+      mirrorToggleBtn.addEventListener('click', () => {
+        mirrored = !mirrored;
+        mirrorToggleBtn.textContent = `Toggle Mirror (currently: ${mirrored ? 'ON' : 'OFF'})`;
+        if (typeof syncOverlayMirror === 'function') syncOverlayMirror();
+      });
+
+      // Initial active states from defaults
+      setActiveButton('faceFilterBtns', defaultFaceFilter || 'none', 'filter');
+      setActiveButton('animatedFilterBtns', defaultAnimatedFilter || 'none', 'anim');
+      mirrorToggleBtn.textContent = `Toggle Mirror (currently: ${defaultMirrored ? 'ON' : 'OFF'})`;
+
+      // =====================
+      // STRIP BUILD OVERRIDE
+      // =====================
+      const origBuildPhotoStrip = buildPhotoStrip;
+      buildPhotoStrip = function(images) {
+        if (!images || images.length === 0) return;
+        stripWorker.postMessage({ images, template: BOOTH_TEMPLATE });
+        stripWorker.onmessage = async (e) => {
+          const blob = e.data.blob;
+          const stripURL = URL.createObjectURL(blob);
+          latestPhotoStrip = stripURL;
+          await addPhotoToDB(blob, "strip");
+          const origBtn = document.getElementById('downloadStripBtn');
+          if (origBtn) origBtn.disabled = false;
+        };
+      };
+
+      function waitForStrip() {
+        return new Promise((resolve) => {
+          const check = setInterval(() => {
+            if (typeof latestPhotoStrip !== 'undefined' && latestPhotoStrip) {
+              clearInterval(check);
+              resolve();
+            }
+          }, 200);
+        });
+      }
+
+      // =====================
+      // WAIT FOR CAMERA / MODELS READY
+      // =====================
+      let cameraReady = false;
+      let modelsReady = false;
+
+      const origHide = hideLoadingScreen;
+      hideLoadingScreen = function() {
+        origHide();
+        modelsReady = true;
+        checkReady();
+      };
+
+      const checkCameraInterval = setInterval(() => {
+        if (typeof cameraFeed !== 'undefined' && cameraFeed.readyState >= 2) {
+          cameraReady = true;
+          clearInterval(checkCameraInterval);
+          checkReady();
+        }
+      }, 200);
+
+      function checkReady() {
+        if (cameraReady && modelsReady) {
+          applyDefaults();
+          startBtn.disabled = false;
+          status.textContent = 'Ready! Press the button to start.';
+        }
+      }
+
+      // =====================
+      // STRIP CAPTURE FLOW
+      // =====================
+      startBtn.addEventListener('click', () => {
+        soundManager.play('click');
+        startBtn.disabled = true;
+        status.textContent = 'Taking photos … smile!';
+        photoStripImages = [];
+        latestPhotoStrip = null;
+        stripOverlay.style.display = 'none';
+        downloadBoothBtn.style.display = 'none';
+        printBoothBtn.style.display = 'none';
+        stripModeEnabled = true;
+        startPhotoStripCapture();
+        waitForStrip().then(() => {
+          stripImg1.src = latestPhotoStrip;
+          stripImg2.src = latestPhotoStrip;
+          stripOverlay.style.display = 'flex';
+          overlayMessage.textContent = 'Your photo strip will disappear in 5 seconds…';
+          setTimeout(() => {
+            stripOverlay.style.display = 'none';
+            downloadBoothBtn.style.display = 'inline-block';
+            printBoothBtn.style.display = 'inline-block';
+            startBtn.style.display = 'inline-block';
+            startBtn.disabled = false;
+            status.textContent = 'Your strip is ready!';
+          }, 5000);
+        });
+      });
+
+      downloadBoothBtn.addEventListener('click', () => {
+        soundManager.play('click');
+        downloadPhotoStrip();
+      });
+
+      printBoothBtn.addEventListener('click', () => {
+        soundManager.play('click');
+        if (!latestPhotoStrip) {
+          alert('No strip to print yet.');
+          return;
+        }
+        stripImg1.src = latestPhotoStrip;
+        stripImg2.src = latestPhotoStrip;
+        stripOverlay.style.display = 'flex';
+        setTimeout(() => {
+          window.print();
+          setTimeout(() => {
+            stripOverlay.style.display = 'none';
+          }, 500);
+        }, 300);
+      });
+    });
+  </script>
+</body>
+</html>
