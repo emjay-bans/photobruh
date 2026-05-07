@@ -83,16 +83,14 @@
                     <input type="range" id="distortStrengthSlider" min="0" max="200" value="30" step="1"
                         oninput="distortionStrength = this.value / 100;">
                     <h3 style="margin-bottom: 0px;margin-top: 5px;">Face Warp</h3>
-                    <button onclick="faceWarpEnabled = !faceWarpEnabled;">
-                    Face Warp: <span id="faceWarpStatus">Off</span>
+                    <button id="faceWarpToggleBtn">Face Warp: Off</button>
+                    <button class="face-warp-btn" data-mode="1">Bulge</button>
+                    <button class="face-warp-btn" data-mode="2">Frog</button>
+                    <button class="face-warp-btn" data-mode="3">Fisheye</button>
+                    <button class="face-warp-btn" data-mode="4">Alien</button>
+                    <button class="face-warp-btn" data-mode="5">Big Nose</button>
+                    <button class="face-warp-btn" data-mode="6">Squeeze</button>
                     </button>
-                    <script>
-                    // Toggle the button text when clicked (inline update)
-                    document.querySelector('#faceWarpStatus').parentElement.addEventListener('click', function(){
-                        const span = document.getElementById('faceWarpStatus');
-                        span.textContent = faceWarpEnabled ? 'On' : 'Off';
-                    });
-                    </script>
                 </div>
                 <label>Grayscale</label>
                 0<input type="range" id="graySlider" min="0" max="100" value="0" step="1">100

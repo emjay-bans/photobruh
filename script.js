@@ -35,6 +35,8 @@ let distortionMode = 0;       // 0=none, 1=bulge, 2=swirl, 3=pinch
 let distortionStrength = 0.0; // controllable range e.g. 0–1
 let faceWarpEnabled = false;
 
+let faceWarpMode = 0;   // 0 = off (but faceWarpEnabled is the master switch), 1-6 as defined
+
 const FILTER_SMOOTHING = 0.75;
 
 // =========================
@@ -246,6 +248,11 @@ const fragmentShaderSource = `
   uniform vec2 uMouthCenter;
   uniform vec2 uNoseTip;
 
+  uniform int uFaceWarpMode;
+  uniform float uFaceWarpRadius;
+  uniform vec2 uMouthLeft;
+  uniform vec2 uMouthRight;
+
   varying vec2 vTexCoord;
 
   float rand(vec2 co) {
@@ -365,30 +372,131 @@ const fragmentShaderSource = `
 
       // --- Face‑specific warps (applied on top of global) ---
       if (uFaceWarpEnabled > 0.5) {
-          vec2 features[4];
-          features[0] = uLeftEye;
-          features[1] = uRightEye;
-          features[2] = uMouthCenter;
-          features[3] = uNoseTip;
-          float radii[4];
-          radii[0] = 0.06;  // eye region radius (normalised)
-          radii[1] = 0.06;
-          radii[2] = 0.08;
-          radii[3] = 0.07;
+        vec2 faceCenter = (uLeftEye + uRightEye) * 0.5;
 
-          for (int i = 0; i < 4; i++) {
-              vec2 delta = st - features[i];
-              float dist = length(delta);
-              float r = radii[i];
+        // --- Mode 1: Original bulge (eyes, mouth, nose) ---
+        if (uFaceWarpMode == 1) {
+            vec2 features[4];
+            features[0] = uLeftEye;
+            features[1] = uRightEye;
+            features[2] = uMouthCenter;
+            features[3] = uNoseTip;
+            float radii[4];
+            radii[0] = 0.06;
+            radii[1] = 0.06;
+            radii[2] = 0.08;
+            radii[3] = 0.07;
 
-              if (dist < r) {
-                  // Simple bulge in the region
-                  float factor = 1.0 - (dist / r);
-                  factor = factor * factor * 0.15; // strength
-                  st += delta * factor;
-              }
-          }
-      }
+            for (int i = 0; i < 4; i++) {
+                vec2 delta = st - features[i];
+                float dist = length(delta);
+                float r = radii[i];
+                if (dist < r) {
+                    float factor = 1.0 - (dist / r);
+                    factor = factor * factor * 0.55;
+                    st -= delta * factor;
+                }
+            }
+        }
+
+        // --- Mode 2: Frog Face (wide mouth, enlarged eyes) ---
+        else if (uFaceWarpMode == 2) {
+            // Wide mouth: stretch horizontally away from mouth centre
+            vec2 mouthDelta = st - uMouthCenter;
+            float mouthDist = length(mouthDelta);
+            float mouthRadius = length(uMouthLeft - uMouthRight) * 0.8;
+            if (mouthDist < mouthRadius) {
+                // strong horizontal stretch
+                float factor = 1.0 - (mouthDist / mouthRadius);
+                factor = pow(factor, 2.0) * 0.5;
+                st.x -= mouthDelta.x * factor * 5.5;
+            }
+
+            // Big eyes: bulge both eyes with larger radius
+            float eyeRadius = 0.14;
+            vec2 deltaL = st - uLeftEye;
+            float distL = length(deltaL);
+            if (distL < eyeRadius) {
+                float f = 1.0 - (distL / eyeRadius);
+                f = f * f * 0.3;
+                st -= deltaL * f;
+            }
+            vec2 deltaR = st - uRightEye;
+            float distR = length(deltaR);
+            if (distR < eyeRadius) {
+                float f = 1.0 - (distR / eyeRadius);
+                f = f * f * 0.3;
+                st -= deltaR * f;
+            }
+        }
+
+        // --- Mode 3: Fisheye centred on the face ---
+        else if (uFaceWarpMode == 3) {
+            vec2 delta = st - faceCenter;
+            float dist = length(delta);
+            float radius = uFaceWarpRadius;
+            if (radius < 0.01) radius = 0.3; // fallback
+            if (dist < radius) {
+                float r = dist / radius;
+                float factor = r * r * 0.6;
+                st = faceCenter + delta * (1.0 - factor);
+            }
+        }
+
+        // --- Mode 4: Alien (huge eyes, pinched mouth) ---
+        else if (uFaceWarpMode == 4) {
+            // Huge eyes
+            float bigEyeRad = 0.18;
+            vec2 dL = st - uLeftEye;
+            float distL = length(dL);
+            if (distL < bigEyeRad) {
+                float f = 1.0 - (distL / bigEyeRad);
+                f = f * f * 0.4;
+                st -= dL * f;
+            }
+            vec2 dR = st - uRightEye;
+            float distR = length(dR);
+            if (distR < bigEyeRad) {
+                float f = 1.0 - (distR / bigEyeRad);
+                f = f * f * 0.4;
+                st -= dR * f;
+            }
+
+            // Pinched mouth (suck in)
+            vec2 mouthD = st - uMouthCenter;
+            float mouthDist = length(mouthD);
+            float mouthRad = 0.12;
+            if (mouthDist < mouthRad) {
+                float f = 1.0 - (mouthDist / mouthRad);
+                f = f * f * 0.5;
+                st += mouthD * f;  // shrink toward centre
+            }
+        }
+
+        // --- Mode 5: Big Nose (only bulge the nose) ---
+        else if (uFaceWarpMode == 5) {
+            vec2 delta = st - uNoseTip;
+            float dist = length(delta);
+            float rad = 0.09;
+            if (dist < rad) {
+                float f = 1.0 - (dist / rad);
+                f = f * f * 0.35;
+                st -= delta * f;
+            }
+        }
+
+        // --- Mode 6: Squeeze everything toward face centre ---
+        else if (uFaceWarpMode == 6) {
+            vec2 delta = st - faceCenter;
+            float dist = length(delta);
+            float maxRad = length(uMouthCenter - faceCenter) * 1.2;
+            if (dist < maxRad) {
+                float factor = 1.0 - (dist / maxRad);
+                factor = factor * 0.4;
+                st += delta * factor;
+            }
+        }
+    }
 
       return st;
   }
@@ -410,7 +518,26 @@ const fragmentShaderSource = `
       vec4 tex = texture2D(uTexture, warpedUV);
       vec3 color = tex.rgb;
 
-      // [ ... all your existing colour processing (gray, contrast, etc.) remains here ... ]
+      // Apply color adjustments (visual filters)
+      float gray = dot(color, vec3(0.299, 0.587, 0.114));
+      color = mix(color, vec3(gray), uGray);
+
+      color = (color - 0.5) * uContrast + 0.5;
+      color *= uBright;
+
+      float luma = dot(color, vec3(0.299, 0.587, 0.114));
+      color = mix(vec3(luma), color, uSaturate);
+
+      color = applyHue(color, uHue);
+
+      vec3 sep = vec3(
+          dot(color, vec3(0.393, 0.769, 0.189)),
+          dot(color, vec3(0.349, 0.686, 0.168)),
+          dot(color, vec3(0.272, 0.534, 0.131))
+      );
+      color = mix(color, sep, uSepia);
+
+      color = mix(color, 1.0 - color, uInvert);
 
       // Your original animated‑effects call:
       color = applyAnimatedFX(uv, color);   // keep as‑is (uses original uv)
@@ -426,6 +553,7 @@ const fragmentShaderSource = `
 function initWebGL() {
   glProgram = createProgram(gl, vertexShaderSource, fragmentShaderSource);
   gl.useProgram(glProgram);
+  console.log(gl.getProgramInfoLog(glProgram));
 
   const vertices = new Float32Array([
     -1, -1,  0, 1,
@@ -479,6 +607,10 @@ function initWebGL() {
   uRightEye      = gl.getUniformLocation(glProgram, "uRightEye");
   uMouthCenter   = gl.getUniformLocation(glProgram, "uMouthCenter");
   uNoseTip       = gl.getUniformLocation(glProgram, "uNoseTip");
+  uFaceWarpMode   = gl.getUniformLocation(glProgram, "uFaceWarpMode");
+  uFaceWarpRadius = gl.getUniformLocation(glProgram, "uFaceWarpRadius");
+  uMouthLeft      = gl.getUniformLocation(glProgram, "uMouthLeft");
+  uMouthRight     = gl.getUniformLocation(glProgram, "uMouthRight");
   uFaceWarpEnabled = gl.getUniformLocation(glProgram, "uFaceWarpEnabled");
 }
 
@@ -532,11 +664,12 @@ function renderWebGL() {
     gl.uniform1f(uFaceWarpEnabled, faceWarpEnabled ? 1.0 : 0.0);
 
     // --- Face warp feature points (normalised 0–1) ---
+    gl.uniform1i(uFaceWarpMode, faceWarpMode);
+
     if (faceWarpEnabled && trackedFaces.length > 0) {
         const face = trackedFaces[0];  // use first face
         const lm = face.landmarks;
 
-        // Helper: normalise a pixel point from the video
         const norm = (p) => ({
             x: p.x / cameraFeed.videoWidth,
             y: p.y / cameraFeed.videoHeight
@@ -546,17 +679,33 @@ function renderWebGL() {
         const rightEye  = norm(getAveragePoint(lm.getRightEye()));
         const mouth     = norm(getAveragePoint(lm.positions.slice(48, 68))); // outer mouth
         const noseTip   = norm(lm.positions[30]);
+        const mouthLeft = norm(lm.positions[48]);   // left corner
+        const mouthRight= norm(lm.positions[54]);   // right corner
+
+        // Face center and radius (for fisheye mode)
+        const faceCenterX = (leftEye.x + rightEye.x) / 2;
+        const faceCenterY = (leftEye.y + rightEye.y) / 2;
+        const faceCenter = { x: faceCenterX, y: faceCenterY };
+        const dx = mouth.x - faceCenter.x;
+        const dy = mouth.y - faceCenter.y;
+        const faceRadius = Math.sqrt(dx*dx + dy*dy) * 1.3;  // a bit bigger than eye-mouth distance
 
         gl.uniform2f(uLeftEye,     leftEye.x,   leftEye.y);
         gl.uniform2f(uRightEye,    rightEye.x,  rightEye.y);
         gl.uniform2f(uMouthCenter, mouth.x,     mouth.y);
         gl.uniform2f(uNoseTip,     noseTip.x,   noseTip.y);
+        gl.uniform2f(uMouthLeft,   mouthLeft.x, mouthLeft.y);
+        gl.uniform2f(uMouthRight,  mouthRight.x,mouthRight.y);
+        gl.uniform1f(uFaceWarpRadius, faceRadius);
     } else {
-        // Set dummy values to avoid undefined behaviour
+        // Safe defaults
         gl.uniform2f(uLeftEye,     -1.0, -1.0);
         gl.uniform2f(uRightEye,    -1.0, -1.0);
         gl.uniform2f(uMouthCenter, -1.0, -1.0);
         gl.uniform2f(uNoseTip,     -1.0, -1.0);
+        gl.uniform2f(uMouthLeft,   -1.0, -1.0);
+        gl.uniform2f(uMouthRight,  -1.0, -1.0);
+        gl.uniform1f(uFaceWarpRadius, 0.3);
     }
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -966,6 +1115,23 @@ document.querySelectorAll(".animated-filter-btn").forEach(btn => {
     resetAnimatedFilterState();
     console.log("Animated filter:", activeAnimatedFilter);
   });
+});
+
+// Face Warp preset buttons
+document.querySelectorAll(".face-warp-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    faceWarpMode = parseInt(btn.dataset.mode);
+    faceWarpEnabled = true;
+    document.getElementById("faceWarpToggleBtn").textContent = "Face Warp: On";
+  });
+});
+
+// Face Warp master toggle
+document.getElementById("faceWarpToggleBtn").addEventListener("click", () => {
+  faceWarpEnabled = !faceWarpEnabled;
+  const btn = document.getElementById("faceWarpToggleBtn");
+  btn.textContent = "Face Warp: " + (faceWarpEnabled ? "On" : "Off");
+  if (!faceWarpEnabled) faceWarpMode = 0;
 });
 
 // =========================
@@ -1573,7 +1739,7 @@ function takePhoto() {
     editorBaseImage = new Image();
     editorBaseImage.onload = () => {
       editorCanvas.style.display = "block";
-      stickers = [];
+      editorObjects  = [];
       redrawEditorCanvas();
     };
     editorBaseImage.src = objectURL;
