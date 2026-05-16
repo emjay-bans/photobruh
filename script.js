@@ -15,6 +15,8 @@ let mirrored = false;
 let activeFaceFilter = null;
 let faceModelsLoaded = false;
 
+let uCropOrigin, uCropScale;
+
 let trackedFaces = [];
 const SMOOTHING = 0.55; // higher = smoother, lower = more responsive
 
@@ -227,6 +229,9 @@ const fragmentShaderSource = `
 
   uniform sampler2D uTexture;
   uniform vec2 uResolution;
+
+  uniform vec2 uCropOrigin;
+  uniform vec2 uCropScale;
 
   uniform float uGray;
   uniform float uBright;
@@ -515,7 +520,10 @@ const fragmentShaderSource = `
       // Add a soft clamp to avoid sampling beyond the texture border
       warpedUV = clamp(warpedUV, vec2(0.001), vec2(0.999));
 
-      vec4 tex = texture2D(uTexture, warpedUV);
+      // Crop to preserve video aspect ratio (cover)
+      vec2 cropUV = uCropOrigin + warpedUV * uCropScale;
+      cropUV = clamp(cropUV, 0.001, 0.999);
+      vec4 tex = texture2D(uTexture, cropUV);
       vec3 color = tex.rgb;
 
       // Apply color adjustments (visual filters)
@@ -612,6 +620,10 @@ function initWebGL() {
   uMouthLeft      = gl.getUniformLocation(glProgram, "uMouthLeft");
   uMouthRight     = gl.getUniformLocation(glProgram, "uMouthRight");
   uFaceWarpEnabled = gl.getUniformLocation(glProgram, "uFaceWarpEnabled");
+
+  // Crop uniforms (maintain video aspect ratio)
+  uCropOrigin = gl.getUniformLocation(glProgram, "uCropOrigin");
+  uCropScale  = gl.getUniformLocation(glProgram, "uCropScale");
 }
 
 // Filter Helper
@@ -708,6 +720,30 @@ function renderWebGL() {
         gl.uniform1f(uFaceWarpRadius, 0.3);
     }
 
+    // Maintain aspect ratio – crop the video to fill the canvas
+    const videoW = cameraFeed.videoWidth  || 1280;
+    const videoH = cameraFeed.videoHeight || 720;
+    const canvasW = glCanvas.width;   // 1280
+    const canvasH = glCanvas.height;  // 720
+
+    const videoAspect = videoW / videoH;
+    const canvasAspect = canvasW / canvasH;
+
+    let cropX = 0, cropY = 0, cropW = 1, cropH = 1;
+
+    if (videoAspect > canvasAspect) {
+      // video wider → crop left/right
+      cropW = canvasAspect / videoAspect;
+      cropX = (1 - cropW) / 2;
+    } else {
+      // video taller → crop top/bottom
+      cropH = videoAspect / canvasAspect;
+      cropY = (1 - cropH) / 2;
+    }
+
+    gl.uniform2f(uCropOrigin, cropX, cropY);
+    gl.uniform2f(uCropScale,  cropW, cropH);
+
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
@@ -748,8 +784,8 @@ overlayCanvas.height = 720;
 overlayCanvas.style.position = "absolute";
 overlayCanvas.style.top = "0";
 overlayCanvas.style.left = "0";
-overlayCanvas.style.width = "1280px";
-overlayCanvas.style.height = "720px";
+overlayCanvas.style.width = "100%";
+overlayCanvas.style.height = "100%";
 overlayCanvas.style.zIndex = "2";
 overlayCanvas.style.pointerEvents = "none";
 overlayCanvas.style.background = "transparent";
@@ -1310,43 +1346,6 @@ if (effects) {
   });
 }
 
-function getVisibleVideoRect() {
-  const videoW = cameraFeed.videoWidth;
-  const videoH = cameraFeed.videoHeight;
-
-  // Use actual render surface, not DOM CSS box
-  const displayW = glCanvas.width;
-  const displayH = glCanvas.height;
-
-  const videoAspect = videoW / videoH;
-  const displayAspect = displayW / displayH;
-
-  let drawW, drawH, offsetX, offsetY;
-
-  if (videoAspect > displayAspect) {
-    // video wider than viewport
-    drawH = videoH;
-    drawW = videoH * displayAspect;
-    offsetX = (videoW - drawW) / 2;
-    offsetY = 0;
-  } else {
-    // video taller than viewport
-    drawW = videoW;
-    drawH = videoW / displayAspect;
-    offsetX = 0;
-    offsetY = (videoH - drawH) / 2;
-  }
-
-  return {
-    offsetX,
-    offsetY,
-    drawW,
-    drawH,
-    displayW,
-    displayH
-  };
-}
-
 // =========================
 // DRAW FACE FILTER (not animated)
 // =========================
@@ -1668,18 +1667,13 @@ function takePhoto() {
     willReadFrequently: true
   });
 
-  const visible = getVisibleVideoRect();
-
-  // Final saved image should match visible preview aspect
-  const outputWidth = 1280;
-  const outputHeight = Math.round(outputWidth * (visible.displayH / visible.displayW));
-
-  canvas.width = outputWidth;
+  const outputWidth  = glCanvas.width;   // 1280
+  const outputHeight = glCanvas.height;  // 720
+  canvas.width  = outputWidth;
   canvas.height = outputHeight;
 
   context.clearRect(0, 0, outputWidth, outputHeight);
   context.save();
-
 
   if (effectsManager.hasActiveEffects()) {
     context.filter = effectsManager.buildFilterString();
@@ -1687,11 +1681,7 @@ function takePhoto() {
 
   soundManager.play("shutter");
 
-  context.drawImage(
-    glCanvas,
-    visible.offsetX, visible.offsetY, visible.drawW, visible.drawH,
-    0, 0, outputWidth, outputHeight
-  );
+  context.drawImage(glCanvas, 0, 0);
 
   // Mirror the filter layer to match the mirrored base image
   if (mirrored) {
@@ -1723,6 +1713,7 @@ function takePhoto() {
     if (!blob) return;
 
     const objectURL = URL.createObjectURL(blob);
+    console.log("Blob size:", blob.size);   // should be > 0
 
     originalCapturedPhoto = objectURL;
 
@@ -1743,10 +1734,12 @@ function takePhoto() {
 
     editorBaseImage = new Image();
     editorBaseImage.onload = () => {
+      console.log("Editor base image loaded");
       editorCanvas.style.display = "block";
       editorObjects  = [];
       redrawEditorCanvas();
-    };
+    }; 
+    editorBaseImage.onerror = () => console.error("Failed to load editor base image");
     editorBaseImage.src = objectURL;
   }, "image/webp", 0.95);
 
@@ -1924,7 +1917,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 function syncOverlaySize() {
   const rect = glCanvas.getBoundingClientRect();
-  overlayCanvas.width = rect.width;
+  overlayCanvas.width  = rect.width;
   overlayCanvas.height = rect.height;
 }
 

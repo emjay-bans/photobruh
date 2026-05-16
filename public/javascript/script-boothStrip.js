@@ -114,26 +114,19 @@ function capturePhotoToDataURL() {
   }
 
   const context = canvas.getContext("2d");
-  const visible = getVisibleVideoRect();
+  const outputWidth  = glCanvas.width;   // 1280
+  const outputHeight = glCanvas.height;  // 720
+  canvas.width  = outputWidth;
+  canvas.height = outputHeight;
 
-  const width = visible.drawW;
-  const height = visible.drawH;
-
-  canvas.width = width;
-  canvas.height = height;
-
-  context.clearRect(0, 0, width, height);
-  context.save();
 
   if (effectsManager.hasActiveEffects()) {
     context.filter = effectsManager.buildFilterString();
   }
 
-  context.drawImage(
-    glCanvas,
-    visible.offsetX, visible.offsetY, visible.drawW, visible.drawH,
-    0, 0, width, height
-  );
+  soundManager.play("shutter");
+
+  context.drawImage(glCanvas, 0, 0);
 
   if (mirrored) {
       context.save();
