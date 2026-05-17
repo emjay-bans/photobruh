@@ -10,31 +10,6 @@
     </head>
 
     <body>
-        <!-- Auth Modal (hidden when logged in) -->
-        <div id="authOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
-        background: rgba(0,0,0,0.85); display:flex; align-items:center; justify-content:center;
-        z-index:1000000; font-family:'MS Sans Serif', sans-serif;">
-            <div id="authBox" style="background:#c0c0c0; padding:30px; border:3px outset #fff;
-                text-align:center; min-width:320px;">
-                <h2>PhotoBruh</h2>
-                <!-- Login form -->
-                <div id="loginForm">
-                <input type="email" id="loginEmail" placeholder="Email" style="width:100%; margin:5px 0; padding:5px;"><br>
-                <input type="password" id="loginPassword" placeholder="Password" style="width:100%; margin:5px 0; padding:5px;"><br>
-                <button id="loginBtn" class="retro-btn">Log In</button>
-                <p><a href="#" id="showSignUp" style="color:#0000ee;">Create an account</a></p>
-                </div>
-                <!-- Signup form -->
-                <div id="signUpForm" style="display:none;">
-                <input type="email" id="signUpEmail" placeholder="Email" style="width:100%; margin:5px 0; padding:5px;"><br>
-                <input type="password" id="signUpPassword" placeholder="Password (min 6 chars)" style="width:100%; margin:5px 0; padding:5px;"><br>
-                <button id="signUpBtn" class="retro-btn">Sign Up</button>
-                <p><a href="#" id="showLogin" style="color:#0000ee;">Already have an account?</a></p>
-                </div>
-                <p id="authError" style="color:red; margin-top:10px;"></p>
-            </div>
-        </div>
-
         <div id="loadingScreen">
             <div id="loadingWindow">
                 <div id="loadingTitleBar">PhotoBruh Boot Manager</div>
@@ -151,13 +126,7 @@
             <div>
                 <br>
                 <button id="openPhotoboothMain" onclick="window.location.href='booth.html';">Open Photobooth!</button>
-                <br> <br>
-                <button id="openAuthBtn">Sign Up / Log In</button>
-                <button id="migrateBtn">Migrate Local Photos to Account</button>
-                <br> <br>
-                <button id="toggleViewBtn" style="display:none;">Show Local Photos</button>
-                <button id="logoutBtn">Log Out</button>
-                <br> <br> <br>
+                <br>
                 <div style="margin-top: 10px;font-size: 20px;font-weight: bold;text-align: center;">Theme the Website!</div>
                 <br>
                 <button id="muteBtn">Sound: On</button>
@@ -183,8 +152,10 @@
         <div id="editorContainer" width="1280" height="720" style="padding:10px;background-color: #bdbdbd;display: block;">
             <div style="width:98%;background-color: var(--bg-panel-dark);border:inset 3px var(--accent);color:white;padding:5px 10px;"><b>Photo Editor</b></div>
             <p style="margin-top: 10px;margin-bottom: 5px;color:black;"><u>F</u>ile   <u>E</u>dit   <u>V</u>iew   <u>I</u>mage   <u>O</u>ptions   <u>H</u>elp</p>
-            <img id="placeholder" src="public/assets/transparent-background.jpg" width="1140" height="641.25" style="position:absolute;z-index: 1;">
-            <canvas id="editorCanvas" width="1140" height="641.25" style="z-index:20;"></canvas>
+            <div style="position:relative; width:1140px; height:641.25px;">
+                <img id="placeholder" src="public/assets/transparent-background.jpg" width="1140" height="641.25" style="position:absolute;z-index: 1;top: 0;left: 0;">
+                <canvas id="editorCanvas" width="1140" height="641.25" style="position:absolute;z-index:20;top: 0;left: 0;"></canvas>
+            </div>
             <div style="margin-top: 10px;">
                 <button onclick="addSticker('parentalAdv')">Parental Advise</button>
                 <button onclick="addSticker('sunglasses')">Sunglasses</button>
