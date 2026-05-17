@@ -15,6 +15,8 @@ let mirrored = false;
 let activeFaceFilter = null;
 let faceModelsLoaded = false;
 
+let uCropOrigin, uCropScale;
+
 let trackedFaces = [];
 const SMOOTHING = 0.55; // higher = smoother, lower = more responsive
 
@@ -38,118 +40,6 @@ let faceWarpEnabled = false;
 let faceWarpMode = 0;   // 0 = off (but faceWarpEnabled is the master switch), 1-6 as defined
 
 const FILTER_SMOOTHING = 0.75;
-
-// =========================
-// DATABASE AND AUTHENTICATION
-// =========================
-
-const API_BASE = 'https://photobruh.onrender.com';  // your Render URL
-let authToken = localStorage.getItem('authToken');
-let currentUser = null;  // will hold { token } if logged in
-
-function setAuthToken(token) {
-  authToken = token;
-  localStorage.setItem('authToken', token);
-}
-
-function clearAuth() {
-  authToken = null;
-  localStorage.removeItem('authToken');
-  currentUser = null;
-}
-
-function isLoggedIn() {
-  return !!authToken;
-}
-
-// Toggle between login / signup forms
-document.getElementById('showSignUp').addEventListener('click', (e) => {
-  e.preventDefault();
-  document.getElementById('loginForm').style.display = 'none';
-  document.getElementById('signUpForm').style.display = 'block';
-  document.getElementById('authError').textContent = '';
-});
-document.getElementById('showLogin').addEventListener('click', (e) => {
-  e.preventDefault();
-  document.getElementById('signUpForm').style.display = 'none';
-  document.getElementById('loginForm').style.display = 'block';
-  document.getElementById('authError').textContent = '';
-});
-
-// Signup
-document.getElementById('signUpBtn').addEventListener('click', async () => {
-  const email = document.getElementById('signUpEmail').value;
-  const password = document.getElementById('signUpPassword').value;
-  const errorEl = document.getElementById('authError');
-  errorEl.textContent = '';
-
-  try {
-    const res = await fetch(`${API_BASE}/api/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setAuthToken(data.token);
-      currentUser = { token: data.token };
-      document.getElementById('authOverlay').style.display = 'none';
-
-      showingServerPhotos = true;
-      updateAuthUI();
-      await displayTakenPhotos();
-      await updatePhotoCounter();
-      updateMigrateButtonVisibility();
-    } else {
-      errorEl.textContent = data.error;
-    }
-  } catch (err) {
-    errorEl.textContent = 'Network error';
-  }
-});
-
-// Login
-document.getElementById('loginBtn').addEventListener('click', async () => {
-  const email = document.getElementById('loginEmail').value;
-  const password = document.getElementById('loginPassword').value;
-  const errorEl = document.getElementById('authError');
-  errorEl.textContent = '';
-
-  try {
-    const res = await fetch(`${API_BASE}/api/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setAuthToken(data.token);
-      currentUser = { token: data.token };
-      document.getElementById('authOverlay').style.display = 'none';
-
-      showingServerPhotos = true;
-      updateAuthUI();
-      await displayTakenPhotos();
-      await updatePhotoCounter();
-      updateMigrateButtonVisibility();
-    } else {
-      errorEl.textContent = data.error;
-    }
-  } catch (err) {
-    errorEl.textContent = 'Network error';
-  }
-});
-
-// Logout
-document.getElementById('logoutBtn').addEventListener('click', async () => {
-  clearAuth();
-  showingServerPhotos = true;
-  updateAuthUI();
-  await displayLocalPhotos();
-  await updatePhotoCounter();
-  document.getElementById('migrateBtn').style.display = 'none';
-  document.getElementById('toggleViewBtn').style.display = 'none';
-});
 
 // =========================
 // INDEXED DB
@@ -339,6 +229,9 @@ const fragmentShaderSource = `
 
   uniform sampler2D uTexture;
   uniform vec2 uResolution;
+
+  uniform vec2 uCropOrigin;
+  uniform vec2 uCropScale;
 
   uniform float uGray;
   uniform float uBright;
@@ -627,7 +520,10 @@ const fragmentShaderSource = `
       // Add a soft clamp to avoid sampling beyond the texture border
       warpedUV = clamp(warpedUV, vec2(0.001), vec2(0.999));
 
-      vec4 tex = texture2D(uTexture, warpedUV);
+      // Crop to preserve video aspect ratio (cover)
+      vec2 cropUV = uCropOrigin + warpedUV * uCropScale;
+      cropUV = clamp(cropUV, 0.001, 0.999);
+      vec4 tex = texture2D(uTexture, cropUV);
       vec3 color = tex.rgb;
 
       // Apply color adjustments (visual filters)
@@ -724,6 +620,10 @@ function initWebGL() {
   uMouthLeft      = gl.getUniformLocation(glProgram, "uMouthLeft");
   uMouthRight     = gl.getUniformLocation(glProgram, "uMouthRight");
   uFaceWarpEnabled = gl.getUniformLocation(glProgram, "uFaceWarpEnabled");
+
+  // Crop uniforms (maintain video aspect ratio)
+  uCropOrigin = gl.getUniformLocation(glProgram, "uCropOrigin");
+  uCropScale  = gl.getUniformLocation(glProgram, "uCropScale");
 }
 
 // Filter Helper
@@ -820,6 +720,30 @@ function renderWebGL() {
         gl.uniform1f(uFaceWarpRadius, 0.3);
     }
 
+    // Maintain aspect ratio – crop the video to fill the canvas
+    const videoW = cameraFeed.videoWidth  || 1280;
+    const videoH = cameraFeed.videoHeight || 720;
+    const canvasW = glCanvas.width;   // 1280
+    const canvasH = glCanvas.height;  // 720
+
+    const videoAspect = videoW / videoH;
+    const canvasAspect = canvasW / canvasH;
+
+    let cropX = 0, cropY = 0, cropW = 1, cropH = 1;
+
+    if (videoAspect > canvasAspect) {
+      // video wider → crop left/right
+      cropW = canvasAspect / videoAspect;
+      cropX = (1 - cropW) / 2;
+    } else {
+      // video taller → crop top/bottom
+      cropH = videoAspect / canvasAspect;
+      cropY = (1 - cropH) / 2;
+    }
+
+    gl.uniform2f(uCropOrigin, cropX, cropY);
+    gl.uniform2f(uCropScale,  cropW, cropH);
+
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
@@ -860,8 +784,8 @@ overlayCanvas.height = 720;
 overlayCanvas.style.position = "absolute";
 overlayCanvas.style.top = "0";
 overlayCanvas.style.left = "0";
-overlayCanvas.style.width = "1280px";
-overlayCanvas.style.height = "720px";
+overlayCanvas.style.width = "100%";
+overlayCanvas.style.height = "100%";
 overlayCanvas.style.zIndex = "2";
 overlayCanvas.style.pointerEvents = "none";
 overlayCanvas.style.background = "transparent";
@@ -1422,43 +1346,6 @@ if (effects) {
   });
 }
 
-function getVisibleVideoRect() {
-  const videoW = cameraFeed.videoWidth;
-  const videoH = cameraFeed.videoHeight;
-
-  // Use actual render surface, not DOM CSS box
-  const displayW = glCanvas.width;
-  const displayH = glCanvas.height;
-
-  const videoAspect = videoW / videoH;
-  const displayAspect = displayW / displayH;
-
-  let drawW, drawH, offsetX, offsetY;
-
-  if (videoAspect > displayAspect) {
-    // video wider than viewport
-    drawH = videoH;
-    drawW = videoH * displayAspect;
-    offsetX = (videoW - drawW) / 2;
-    offsetY = 0;
-  } else {
-    // video taller than viewport
-    drawW = videoW;
-    drawH = videoW / displayAspect;
-    offsetX = 0;
-    offsetY = (videoH - drawH) / 2;
-  }
-
-  return {
-    offsetX,
-    offsetY,
-    drawW,
-    drawH,
-    displayW,
-    displayH
-  };
-}
-
 // =========================
 // DRAW FACE FILTER (not animated)
 // =========================
@@ -1780,18 +1667,13 @@ function takePhoto() {
     willReadFrequently: true
   });
 
-  const visible = getVisibleVideoRect();
-
-  // Final saved image should match visible preview aspect
-  const outputWidth = 1280;
-  const outputHeight = Math.round(outputWidth * (visible.displayH / visible.displayW));
-
-  canvas.width = outputWidth;
+  const outputWidth  = glCanvas.width;   // 1280
+  const outputHeight = glCanvas.height;  // 720
+  canvas.width  = outputWidth;
   canvas.height = outputHeight;
 
   context.clearRect(0, 0, outputWidth, outputHeight);
   context.save();
-
 
   if (effectsManager.hasActiveEffects()) {
     context.filter = effectsManager.buildFilterString();
@@ -1799,11 +1681,7 @@ function takePhoto() {
 
   soundManager.play("shutter");
 
-  context.drawImage(
-    glCanvas,
-    visible.offsetX, visible.offsetY, visible.drawW, visible.drawH,
-    0, 0, outputWidth, outputHeight
-  );
+  context.drawImage(glCanvas, 0, 0);
 
   // Mirror the filter layer to match the mirrored base image
   if (mirrored) {
@@ -1834,61 +1712,36 @@ function takePhoto() {
   canvas.toBlob(async (blob) => {
     if (!blob) return;
 
-    // Always save locally
-    await addPhotoToDB(blob, 'photo');
-
-    // If logged in, also upload to server
-    if (isLoggedIn()) {
-      const form = new FormData();
-      form.append('photo', blob, 'photo.webp');
-      try {
-        const res = await fetch(`${API_BASE}/api/photos`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${authToken}` },
-          body: form
-        });
-        if (res.ok) {
-          const data = await res.json();
-          console.log('Uploaded:', data.url);
-        }
-      } catch (err) {
-        console.error('Upload error:', err);
-      }
-    }
-
-    // Show preview locally (still works)
     const objectURL = URL.createObjectURL(blob);
-<<<<<<< HEAD
-=======
+    console.log("Blob size:", blob.size);   // should be > 0
 
->>>>>>> parent of 00775e7 (Not stretched mobile camera)
     originalCapturedPhoto = objectURL;
-    photo.src = objectURL;
-    photo.style.display = 'block';
-    photo.style.opacity = '1';
 
-    // Update editor
+    photo.src = objectURL;
+    photo.style.display = "block";
+    photo.style.opacity = "1";
+
+    const testImg = new Image();
+    testImg.onload = () => {
+      console.log("Captured size:", testImg.naturalWidth, testImg.naturalHeight);
+    };
+    testImg.src = objectURL;
+
+    await addPhotoToDB(blob, "photo");
+
+    await displayTakenPhotos();
+    await updatePhotoCounter();
+
     editorBaseImage = new Image();
     editorBaseImage.onload = () => {
-<<<<<<< HEAD
-      console.log('Editor base image loaded');
-      editorCanvas.style.display = 'block';
-      editorObjects = [];
-      redrawEditorCanvas();
-    };
-    editorBaseImage.onerror = () => console.error('Failed to load editor base image');
-=======
+      console.log("Editor base image loaded");
       editorCanvas.style.display = "block";
       editorObjects  = [];
       redrawEditorCanvas();
-    };
->>>>>>> parent of 00775e7 (Not stretched mobile camera)
+    }; 
+    editorBaseImage.onerror = () => console.error("Failed to load editor base image");
     editorBaseImage.src = objectURL;
-
-    // Refresh gallery and counter
-    await displayTakenPhotos();
-    await updatePhotoCounter();
-  }, 'image/webp', 0.95);
+  }, "image/webp", 0.95);
 
   setTimeout(() => {
     photo.classList.add("fade-out");
@@ -1954,147 +1807,54 @@ function handleFadeEnd() {
 // =========================
 
 async function updatePhotoCounter() {
-  if (isLoggedIn() && showingServerPhotos) {
-    try {
-      const res = await fetch(`${API_BASE}/api/photos`, {
-        headers: { Authorization: `Bearer ${authToken}` }
-      });
-      if (res.ok) {
-        const photos = await res.json();
-        document.getElementById('photoCounter').textContent = `Photos Taken: ${photos.length} (cloud)`;
-        return;
-      }
-    } catch (e) {}
-  } else {
-    const count = await countPhotosInDB();
-    document.getElementById('photoCounter').textContent = `Photos Taken: ${count} (local)`;
-  }
-
+  const total = await countPhotosInDB();
+  const counter = document.getElementById("photoCounter");
+  counter.textContent = `Photos Taken: ${total}`;
 }
-
-// ========================
-// TOGGLE LOCAL AND SERVER
-// ========================
-
-let showingServerPhotos = true; // default when logged in
-
-document.getElementById('toggleViewBtn')?.addEventListener('click', async () => {
-  if (!isLoggedIn()) return;
-  showingServerPhotos = !showingServerPhotos;
-  const btn = document.getElementById('toggleViewBtn');
-  btn.textContent = showingServerPhotos ? 'Show Local Photos' : 'Show Cloud Photos';
-  await displayTakenPhotos();
-  await updatePhotoCounter();
-});
 
 // =========================
 // GALLERY
 // =========================
+async function displayTakenPhotos() {
+  const photoContainer = document.getElementById("photoContainer");
+  const photos = await getAllPhotosFromDB();
 
-async function displayLocalPhotos() {
-  const container = document.getElementById('photoContainer');
-  container.innerHTML = '';
+  photoContainer.innerHTML = "";
 
-  const photos = await getAllPhotosFromDB();  // your existing IndexedDB reader
-  if (photos.length === 0) {
-    container.innerHTML = '<p>No saved photos yet (local).</p>';
+  if (!photos.length) {
+    photoContainer.innerHTML = "<p>No saved photos yet.</p>";
     return;
   }
 
-  photos.forEach((entry) => {
-    const wrapper = document.createElement('div');
-    wrapper.classList.add('photo-item');
+  photos.forEach((entry, index) => {
+    const wrapper = document.createElement("div");
+    wrapper.classList.add("photo-item");
 
-    const img = document.createElement('img');
+    const img = document.createElement("img");
     const objectURL = URL.createObjectURL(entry.blob);
-    img.src = objectURL;
-    img.alt = 'Local Photo';
-    img.classList.add('saved-photo');
-    img.addEventListener('click', () => openPhotoModal(objectURL));
 
-    const deleteBtn = document.createElement('button');
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.classList.add('delete-btn');
-    deleteBtn.addEventListener('click', async () => {
-      soundManager.play('delete');
+    img.src = objectURL;
+    img.alt = `Saved Photo ${index + 1}`;
+    img.classList.add("saved-photo");
+
+    img.addEventListener("click", () => openPhotoModal(objectURL));
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "Delete";
+    deleteBtn.classList.add("delete-btn");
+
+    deleteBtn.addEventListener("click", async () => {
+      soundManager.play("delete");
       await deletePhotoFromDB(entry.id);
-      URL.revokeObjectURL(objectURL);
-      await displayLocalPhotos();
+      await displayTakenPhotos();
       await updatePhotoCounter();
     });
 
     wrapper.appendChild(img);
     wrapper.appendChild(deleteBtn);
-    container.appendChild(wrapper);
+    photoContainer.appendChild(wrapper);
   });
 }
-
-async function displayServerPhotos() {
-  const container = document.getElementById('photoContainer');
-  container.innerHTML = '';
-
-  if (!isLoggedIn()) {
-    container.innerHTML = '<p>Log in to see cloud photos.</p>';
-    return;
-  }
-
-  try {
-    const res = await fetch(`${API_BASE}/api/photos`, {
-      headers: { Authorization: `Bearer ${authToken}` }
-    });
-    if (!res.ok) return;
-    const photos = await res.json();
-
-    if (photos.length === 0) {
-      container.innerHTML = '<p>No saved photos yet (cloud).</p>';
-      return;
-    }
-
-    photos.forEach((p) => {
-      const wrapper = document.createElement('div');
-      wrapper.classList.add('photo-item');
-
-      const img = document.createElement('img');
-      img.src = p.url;   // e.g. /uploads/12345.webp
-      img.alt = 'Cloud Photo';
-      img.classList.add('saved-photo');
-      img.addEventListener('click', () => openPhotoModal(p.url));
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.textContent = 'Delete';
-      deleteBtn.classList.add('delete-btn');
-      deleteBtn.addEventListener('click', async () => {
-        soundManager.play('delete');
-        const delRes = await fetch(`${API_BASE}/api/photos/${p.id}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${authToken}` }
-        });
-        if (delRes.ok) {
-          await displayServerPhotos();
-          await updatePhotoCounter();
-        }
-      });
-
-      wrapper.appendChild(img);
-      wrapper.appendChild(deleteBtn);
-      container.appendChild(wrapper);
-    });
-  } catch (err) {
-    console.error('Server gallery error:', err);
-  }
-}
-
-// Global toggle
-
-async function displayTakenPhotos() {
-  if (isLoggedIn() && showingServerPhotos) {
-    await displayServerPhotos();
-  } else {
-    // Show local if not logged in or if user explicitly chose local
-    await displayLocalPhotos();
-  }
-}
-
 
 // =========================
 // MODAL
@@ -2144,123 +1904,20 @@ themeBtn.addEventListener("click", () => {
 });
 
 
-// ========================
-// AFTER LOGIN
-// ========================
-
-// INDEXEDDB MIGRATION TO AUTH
-
-async function migrateLocalPhotos() {
-  if (!isLoggedIn()) return alert('You must be logged in to migrate.');
-
-  const photos = await getAllPhotosFromDB();
-  if (photos.length === 0) return alert('No local photos to migrate.');
-
-  let uploaded = 0;
-  for (const entry of photos) {
-    try {
-      const form = new FormData();
-      form.append('photo', entry.blob, 'migrated.webp');
-
-      const res = await fetch(`${API_BASE}/api/photos`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` },
-        body: form
-      });
-
-      if (res.ok) {
-        uploaded++;
-        await deletePhotoFromDB(entry.id); // remove from IndexedDB
-      }
-    } catch (e) {
-      console.error('Migration error:', e);
-    }
-  }
-
-  alert(`Migrated ${uploaded} of ${photos.length} photos.`);
-  // Refresh gallery (server now shows them)
-  await displayTakenPhotos();
-  await updatePhotoCounter();
-  updateMigrateButtonVisibility();
-}
-
-// BUTTONS AND AUTH STATES
-
-function updateAuthUI() {
-  const openBtn = document.getElementById('openAuthBtn');
-  const logoutBtn = document.getElementById('logoutBtn');
-  const toggleBtn = document.getElementById('toggleViewBtn');
-  const migrateBtn = document.getElementById('migrateBtn');
-
-  if (openBtn) {
-    openBtn.textContent = isLoggedIn() ? 'My Account' : 'Sign Up / Log In';
-  }
-  if (logoutBtn) {
-    logoutBtn.style.display = isLoggedIn() ? 'inline-block' : 'none';
-  }
-  if (toggleBtn) {
-    toggleBtn.style.display = isLoggedIn() ? 'inline-block' : 'none';
-    toggleBtn.textContent = showingServerPhotos ? 'Show Local Photos' : 'Show Cloud Photos';
-  }
-  if (migrateBtn) {
-    // Will be handled by updateMigrateButtonVisibility later
-  }
-}
-
-document.getElementById('openAuthBtn').addEventListener('click', () => {
-  if (isLoggedIn()) {
-    // already logged in – do nothing (the logout button handles sign out)
-    return;
-  }
-  document.getElementById('authOverlay').style.display = 'flex';
-  document.getElementById('authError').textContent = '';
-});
-
-document.getElementById('authOverlay').addEventListener('click', (e) => {
-  if (e.target.id === 'authOverlay') {
-    document.getElementById('authOverlay').style.display = 'none';
-  }
-});
-
-async function updateMigrateButtonVisibility() {
-  const btn = document.getElementById('migrateBtn');
-  if (!btn) return;
-  if (!isLoggedIn()) {
-    btn.style.display = 'none';
-    return;
-  }
-  const photos = await getAllPhotosFromDB();
-  btn.style.display = photos.length > 0 ? 'inline-block' : 'none';
-}
-
-document.getElementById('migrateBtn')?.addEventListener('click', async () => {
-  soundManager.play('click');
-  await migrateLocalPhotos();
-});
-
 // =========================
 // INIT
 // =========================
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener("DOMContentLoaded", async () => {
   await initDB();
   await migrateLocalStorageToIndexedDB();
-
-  document.getElementById('authOverlay').style.display = 'none';
-  
-  // Do NOT show auth overlay automatically
-  updateAuthUI();   // this will show/hide login/logout buttons etc.
-
-  // Always show local photos by default (or server if logged in)
-  if (isLoggedIn()) {
-    currentUser = { token: authToken };
-  }
   await displayTakenPhotos();
   await updatePhotoCounter();
+  syncOverlayMirror();
 });
 
 function syncOverlaySize() {
   const rect = glCanvas.getBoundingClientRect();
-  overlayCanvas.width = rect.width;
+  overlayCanvas.width  = rect.width;
   overlayCanvas.height = rect.height;
 }
 
