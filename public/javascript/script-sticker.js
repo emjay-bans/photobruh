@@ -71,7 +71,18 @@ function addText() {
 }
 
 function redrawEditorCanvas() {
-  if (!editorBaseImage) return;
+  // Lazy‑init the context if it hasn’t been set yet
+  if (!editorCtx && editorCanvas) {
+    editorCtx = editorCanvas.getContext("2d");
+  }
+
+  if (!editorBaseImage || !editorCtx) {
+    console.warn("Editor not ready – image or context missing", {
+      baseImage: !!editorBaseImage,
+      ctx: !!editorCtx
+    });
+    return;
+  }
 
   placeholder.style.display = "none";
   editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
@@ -81,73 +92,72 @@ function redrawEditorCanvas() {
 
   // draw stickers
   editorObjects.forEach(obj => {
-  editorCtx.save();
-  editorCtx.translate(obj.x + obj.width / 2, obj.y + obj.height / 2);
-  editorCtx.rotate(obj.rotation);
+    editorCtx.save();
+    editorCtx.translate(obj.x + obj.width / 2, obj.y + obj.height / 2);
+    editorCtx.rotate(obj.rotation);
 
-  if (obj.type === "sticker") {
-    editorCtx.drawImage(
-      obj.img,
-      -obj.width / 2,
-      -obj.height / 2,
-      obj.width,
-      obj.height
-    );
-  }
+    if (obj.type === "sticker") {
+      editorCtx.drawImage(
+        obj.img,
+        -obj.width / 2,
+        -obj.height / 2,
+        obj.width,
+        obj.height
+      );
+    }
+    else if (obj.type === "text") {
+      editorCtx.font = `${obj.fontSize}px ${obj.fontFamily}`;
+      editorCtx.textAlign = "center";
+      editorCtx.textBaseline = "middle";
+      editorCtx.lineWidth = Math.max(2, obj.fontSize / 12);
 
-  else if (obj.type === "text") {
-    editorCtx.font = `${obj.fontSize}px ${obj.fontFamily}`;
-    editorCtx.textAlign = "center";
-    editorCtx.textBaseline = "middle";
-    editorCtx.lineWidth = Math.max(2, obj.fontSize / 12);
+      editorCtx.strokeStyle = obj.stroke;
+      editorCtx.strokeText(obj.text, 0, 0);
 
-    editorCtx.strokeStyle = obj.stroke;
-    editorCtx.strokeText(obj.text, 0, 0);
+      editorCtx.fillStyle = obj.color;
+      editorCtx.fillText(obj.text, 0, 0);
+    }
 
-    editorCtx.fillStyle = obj.color;
-    editorCtx.fillText(obj.text, 0, 0);
-  }
+    if (obj === activeSticker) {
+      editorCtx.strokeStyle = "#00a8ff";
+      editorCtx.lineWidth = 2;
+      editorCtx.strokeRect(
+        -obj.width / 2,
+        -obj.height / 2,
+        obj.width,
+        obj.height
+      );
 
-  if (obj === activeSticker) {
-    editorCtx.strokeStyle = "#00a8ff";
-    editorCtx.lineWidth = 2;
-    editorCtx.strokeRect(
-      -obj.width / 2,
-      -obj.height / 2,
-      obj.width,
-      obj.height
-    );
+      // delete handle
+      editorCtx.fillStyle = "#ff4d4d";
+      editorCtx.fillRect(
+        -obj.width / 2 - HANDLE_SIZE / 2,
+        -obj.height / 2 - HANDLE_SIZE / 2,
+        HANDLE_SIZE,
+        HANDLE_SIZE
+      );
 
-    // delete
-    editorCtx.fillStyle = "#ff4d4d";
-    editorCtx.fillRect(
-      -obj.width / 2 - HANDLE_SIZE / 2,
-      -obj.height / 2 - HANDLE_SIZE / 2,
-      HANDLE_SIZE,
-      HANDLE_SIZE
-    );
+      // rotate handle
+      editorCtx.fillStyle = "#ffd24d";
+      editorCtx.fillRect(
+        -HANDLE_SIZE / 2,
+        -obj.height / 2 - 30,
+        HANDLE_SIZE,
+        HANDLE_SIZE
+      );
 
-    // rotate
-    editorCtx.fillStyle = "#ffd24d";
-    editorCtx.fillRect(
-      -HANDLE_SIZE / 2,
-      -obj.height / 2 - 30,
-      HANDLE_SIZE,
-      HANDLE_SIZE
-    );
+      // resize handle
+      editorCtx.fillStyle = "#4dff88";
+      editorCtx.fillRect(
+        obj.width / 2 - HANDLE_SIZE / 2,
+        obj.height / 2 - HANDLE_SIZE / 2,
+        HANDLE_SIZE,
+        HANDLE_SIZE
+      );
+    }
 
-    // resize
-    editorCtx.fillStyle = "#4dff88";
-    editorCtx.fillRect(
-      obj.width / 2 - HANDLE_SIZE / 2,
-      obj.height / 2 - HANDLE_SIZE / 2,
-      HANDLE_SIZE,
-      HANDLE_SIZE
-    );
-  }
-
-  editorCtx.restore();
-});
+    editorCtx.restore();
+  });
 }
 
 function getObjectBounds(obj) {
