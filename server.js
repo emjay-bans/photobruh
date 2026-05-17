@@ -6,11 +6,38 @@ const multer = require('multer');
 const path = require('path');
 const Database = require('better-sqlite3');
 
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const streamifier = require('streamifier');
+const fs = require('fs');    // still needed for creating the data directory maybe
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
 require('dotenv').config();
 
 const db = new Database('database.sqlite');
 const JWT_SECRET = process.env.JWT_SECRET;
 const PORT = 3000;
+
+// Ensure the photos table has the needed columns
+db.exec(`
+  CREATE TABLE IF NOT EXISTS photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    url TEXT,
+    public_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
+// If the table already existed but without the new columns, add them
+try { db.exec(`ALTER TABLE photos ADD COLUMN url TEXT`); } catch (e) {}
+try { db.exec(`ALTER TABLE photos ADD COLUMN public_id TEXT`); } catch (e) {}
 
 const app = express();
 app.use(cors());
@@ -20,7 +47,6 @@ app.use(express.json());
 app.use(express.static(__dirname));
 
 // Serve uploaded photos
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ---------- Authentication endpoints ----------
 
@@ -83,8 +109,9 @@ const storage = multer.diskStorage({
     cb(null, filename);
   }
 });
+// Multer memory storage – we'll upload the buffer to Cloudinary manually
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
   fileFilter: (req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/webp'];
@@ -92,33 +119,53 @@ const upload = multer({
   }
 });
 
-app.post('/api/photos', authMiddleware, upload.single('photo'), (req, res) => {
+app.post('/api/photos', authMiddleware, upload.single('photo'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No photo uploaded' });
 
-  db.prepare('INSERT INTO photos (user_id, filename) VALUES (?, ?)')
-    .run(req.userId, req.file.filename);
+  // Upload buffer to Cloudinary
+  const uploadStream = cloudinary.uploader.upload_stream(
+    { folder: 'photobruh' },   // optional folder in Cloudinary
+    (error, result) => {
+      if (error) {
+        console.error('Cloudinary upload error:', error);
+        return res.status(500).json({ error: 'Upload failed' });
+      }
 
-  res.json({ url: `/uploads/${req.file.filename}` });
+      // result contains secure_url and public_id
+      const { secure_url, public_id } = result;
+
+      // Save to database
+      db.prepare('INSERT INTO photos (user_id, url, public_id) VALUES (?, ?, ?)')
+        .run(req.userId, secure_url, public_id);
+
+      res.json({ url: secure_url, public_id });
+    }
+  );
+
+  // Pipe the buffer into the upload stream
+  streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
 });
 
 // List all photos for logged-in user
 app.get('/api/photos', authMiddleware, (req, res) => {
-  const photos = db.prepare('SELECT id, filename, created_at FROM photos WHERE user_id = ? ORDER BY created_at DESC')
-    .all(req.userId)
-    .map(p => ({ ...p, url: `/uploads/${p.filename}` }));
+  const photos = db.prepare('SELECT id, url, created_at FROM photos WHERE user_id = ? ORDER BY created_at DESC')
+    .all(req.userId);
   res.json(photos);
 });
 
 // Delete a photo
 app.delete('/api/photos/:id', authMiddleware, (req, res) => {
-  const photo = db.prepare('SELECT filename FROM photos WHERE id = ? AND user_id = ?')
+  const photo = db.prepare('SELECT public_id FROM photos WHERE id = ? AND user_id = ?')
     .get(req.params.id, req.userId);
   if (!photo) return res.status(404).json({ error: 'Photo not found' });
 
-  // Remove file
-  const filePath = path.join(__dirname, 'uploads', photo.filename);
-  try { require('fs').unlinkSync(filePath); } catch (e) {}
+  // Delete from Cloudinary
+  cloudinary.uploader.destroy(photo.public_id, (error, result) => {
+    if (error) console.error('Cloudinary delete error:', error);
+    // Continue even if deletion fails (maybe already deleted)
+  });
 
+  // Delete from database
   db.prepare('DELETE FROM photos WHERE id = ? AND user_id = ?')
     .run(req.params.id, req.userId);
   res.json({ success: true });
