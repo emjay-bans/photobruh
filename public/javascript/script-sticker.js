@@ -4,7 +4,7 @@ const placeholder = document.getElementById("placeholder");
 let editorCtx = null;  
 
 if (editorCanvas) {
-  const editorCtx = editorCanvas.getContext("2d");
+  editorCtx = editorCanvas.getContext("2d");
 }
 
 let editorBaseImage = null;
