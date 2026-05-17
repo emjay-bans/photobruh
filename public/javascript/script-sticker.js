@@ -1,5 +1,8 @@
 const editorCanvas = document.getElementById("editorCanvas");
 const placeholder = document.getElementById("placeholder");
+
+let editorCtx = null;  
+
 if (editorCanvas) {
   const editorCtx = editorCanvas.getContext("2d");
 }
