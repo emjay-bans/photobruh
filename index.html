@@ -183,10 +183,8 @@
         <div id="editorContainer" width="1280" height="720" style="padding:10px;background-color: #bdbdbd;display: block;">
             <div style="width:98%;background-color: var(--bg-panel-dark);border:inset 3px var(--accent);color:white;padding:5px 10px;"><b>Photo Editor</b></div>
             <p style="margin-top: 10px;margin-bottom: 5px;color:black;"><u>F</u>ile   <u>E</u>dit   <u>V</u>iew   <u>I</u>mage   <u>O</u>ptions   <u>H</u>elp</p>
-            <div style="position:relative; width:1140px; height:641.25px;">
-                <img id="placeholder" src="public/assets/transparent-background.jpg" width="1140" height="641.25" style="position:absolute;z-index: 1;top: 0;left: 0;">
-                <canvas id="editorCanvas" width="1140" height="641.25" style="position:absolute;z-index:20;top: 0;left: 0;"></canvas>
-            </div>
+            <img id="placeholder" src="public/assets/transparent-background.jpg" width="1140" height="641.25" style="position:absolute;z-index: 1;">
+            <canvas id="editorCanvas" width="1140" height="641.25" style="z-index:20;"></canvas>
             <div style="margin-top: 10px;">
                 <button onclick="addSticker('parentalAdv')">Parental Advise</button>
                 <button onclick="addSticker('sunglasses')">Sunglasses</button>

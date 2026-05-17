@@ -1,10 +1,7 @@
 const editorCanvas = document.getElementById("editorCanvas");
 const placeholder = document.getElementById("placeholder");
-
-let editorCtx = null;               // ✅ now accessible everywhere
-
 if (editorCanvas) {
-  editorCtx = editorCanvas.getContext("2d");
+  const editorCtx = editorCanvas.getContext("2d");
 }
 
 let editorBaseImage = null;
@@ -13,7 +10,9 @@ let activeSticker = null;
 let dragOffsetX = 0;
 let dragOffsetY = 0;
 
-let interactionMode = null;
+let interactionMode = null; 
+// "move" | "resize" | "rotate"
+
 const HANDLE_SIZE = 18;
 
 const stickerAssets = {

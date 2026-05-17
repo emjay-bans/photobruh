@@ -404,31 +404,6 @@ button:active {
     height: 720px;
 }
 
-#cameraWrapper {
-  width: 100%;
-  max-width: 1280px;
-  aspect-ratio: 16 / 9;   /* keeps the height proportional */
-  height: auto;
-  overflow: hidden;
-  position: relative;
-}
-
-#glCanvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-/* Also make the overlay canvas match */
-#filterOverlay {
-  width: 100%;
-  height: 100%;
-  /* remove the inline width/height styles – they are set in JS anyway */
-}
-
 #cameraFeed {
     position: absolute;
     top: 0;
