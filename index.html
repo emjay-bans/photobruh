@@ -7,6 +7,7 @@
         <link rel="stylesheet" href="style.css">
         <link rel="icon" href="public/assets/favicon.png">
         <script defer src="https://cdn.jsdelivr.net/npm/face-api.js/dist/face-api.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     </head>
 
     <body>
@@ -38,11 +39,11 @@
                 <div id="countdown"></div>
                 <br>
                 <div id="belowFeed" style="display: flex;align-items: center;">
-                    <button id="snap"></button>
-                    <button id="photoStripBtn"></button>
-                    <button id="effects" style="position:relative;left:34%;">Effects and Filters</button>
-                    <button id="mirrorer" style="margin-right: 10px;">Mirror <br> Camera</button>
-                    <button id="switchCameraBtn">Switch Camera</button>
+                    <button id="snap" aria-label="Take photo"></button>
+                    <button id="photoStripBtn" aria-label="Start photo strip"></button>
+                    <button id="effects" style="position:relative;left:34%;" aria-label="Open effects and filters panel">Effects and Filters</button>
+                    <button id="mirrorer" style="margin-right: 10px;" aria-label="Mirror camera">Mirror <br> Camera</button>
+                    <button id="switchCameraBtn" aria-label="Switch camera">Switch Camera</button>
                 </div>
                 <canvas id="preview" style="display: none;"></canvas>
                 <img id="photo" style="width:1280px;height:720px;" alt="">
@@ -112,6 +113,7 @@
         </div>
         <br>
         <div id="photoCounter">Photos Taken: 0</div>
+        <div id="storageInfo" style="text-align:center; font-size:14px; margin-top:10px;"></div>
         <br>
         
         <div style="display:flex;gap: 20px;">
@@ -119,9 +121,9 @@
                 <br>
                 <div style="margin-top: 10px;font-size: 20px;font-weight: bold;text-align: center;">Download Here!</div>
                 <br>
-                <button id="downloadOriginalBtn">Download Original <i>(the picture you just took)</i></button>
+                <button id="downloadOriginalBtn" aria-label="Download original photo">Download Original <i>(the picture you just took)</i></button>
                 <br> <br>
-                <button id="downloadStripBtn">Download Photo Strip</button>
+                <button id="downloadStripBtn" aria-label="Download photo strip">Download Photo Strip</button>
             </div>
             <div>
                 <br>
@@ -129,8 +131,9 @@
                 <br>
                 <div style="margin-top: 10px;font-size: 20px;font-weight: bold;text-align: center;">Theme the Website!</div>
                 <br>
-                <button id="muteBtn">Sound: On</button>
-                <button id="themeBtn">Theme: Win95</button>
+                <button id="muteBtn" aria-label="Toggle sound">Sound: On</button>
+                <button id="themeBtn" aria-label="Change theme">Theme: Win95</button>
+                <button id="contrastBtn" aria-label="Toggle high contrast mode">High Contrast</button>
                 <br> <br>
                 <label>Volume</label>
                 <input type="range" id="volumeSlider" min="0" max="100" value="70">
@@ -141,6 +144,18 @@
 
         <br> <br>
         <h1><i>V</i>iew <i>T</i>aken <i>P</i>ictures <i>H</i>ere<i>!</i></h1>
+        <div id="galleryControls" style="text-align:center; margin:10px 0;">
+            <button id="deleteSelectedBtn">Delete Selected</button>
+            <button id="clearAllBtn">Clear All Photos</button>
+            <select id="sortSelect" style="font-family:'Dos';">
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="photos">Photos Only</option>
+                <option value="strips">Strips Only</option>
+            </select>
+            <button id="exportZipBtn">Download All as ZIP</button>
+        </div>
+
         <div id="photoContainer"> </div>
         
         <div id="photoModal" class="photo-modal" onclick="closePhotoModal()" style="color:white;display:none;flex-direction: column;">
@@ -154,13 +169,34 @@
             <p style="margin-top: 10px;margin-bottom: 5px;color:black;"><u>F</u>ile   <u>E</u>dit   <u>V</u>iew   <u>I</u>mage   <u>O</u>ptions   <u>H</u>elp</p>
             <div style="position:relative; width:1140px; height:641.25px;">
                 <img id="placeholder" src="public/assets/transparent-background.jpg" width="1140" height="641.25" style="position:absolute;z-index: 1;top: 0;left: 0;">
-                <canvas id="editorCanvas" width="1140" height="641.25" style="position:absolute;z-index:20;top: 0;left: 0;"></canvas>
+                <canvas id="editorCanvas" width="1140" height="641.25" style="position:absolute;z-index:20;top: 0;left: 0;" aria-label="Photo editor canvas"></canvas>
+                <input id="textInputOverlay" type="text" style="
+                    position: absolute;
+                    top: 50%; left: 50%;
+                    transform: translate(-50%, -50%);
+                    font-size: 64px;
+                    font-family: Impact, sans-serif;
+                    background: transparent;
+                    border: 2px dashed #fff;
+                    color: white;
+                    text-shadow: 2px 2px 0 black;
+                    padding: 10px 20px;
+                    display: none;
+                    z-index: 300000000;
+                    text-align: center;
+                    outline: none;
+                    min-width: 200px;
+                "/>
             </div>
             <div style="margin-top: 10px;">
                 <button onclick="addSticker('parentalAdv')">Parental Advise</button>
+
                 <button onclick="addSticker('sunglasses')">Sunglasses</button>
+
                 <button onclick="addSticker('swag')">Swag</button>
+
                 <button onclick="addSticker('waitImGoated')">Wait, I'm Goated</button>
+
                 <button onclick="addText()">Add Text</button>
             </div> <br>
             <button id="downloadEditedBtn"><h3>Download Edited</h3></button>

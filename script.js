@@ -1,3 +1,40 @@
+// ==============================
+// COMPATIBILITY CHECK
+// ==============================
+
+// --- Add at the very beginning of script.js (before any other code) ---
+(function checkCompatibility() {
+  const missing = [];
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+    missing.push("Camera API (getUserMedia)");
+  if (!window.WebGLRenderingContext)
+    missing.push("WebGL");
+  if (!window.indexedDB)
+    missing.push("IndexedDB");
+  if (typeof Worker === "undefined")
+    missing.push("Web Workers (needed for strip)");
+
+  if (missing.length > 0) {
+    // Replace the entire page with a compatibility message
+    document.body.innerHTML = `
+      <div style="max-width:600px; margin:100px auto; text-align:center; font-family:sans-serif;">
+        <h2>⚠️ Browser Not Supported</h2>
+        <p>Your browser is missing the following features:</p>
+        <ul style="text-align:left; display:inline-block;">
+          ${missing.map(f => `<li>${f}</li>`).join("")}
+        </ul>
+        <p>Please use a modern browser like Chrome, Edge, or Firefox.</p>
+      </div>
+    `;
+    // Stop further script execution
+    throw new Error("Incompatible browser – stopped loading.");
+  }
+})();
+
+// =======================
+// VARIABLES
+// =======================
+
 const cameraFeed = document.getElementById('cameraFeed');
 const mirrorer = document.getElementById('mirrorer');
 const snap = document.getElementById('snap');
@@ -41,6 +78,75 @@ let faceWarpMode = 0;   // 0 = off (but faceWarpEnabled is the master switch), 1
 
 const FILTER_SMOOTHING = 0.75;
 
+// ==========================
+// CAMERA PERMISSION ERRORS
+// ==========================
+
+const cameraErrorOverlay = document.createElement("div");
+cameraErrorOverlay.id = "cameraErrorOverlay";
+cameraErrorOverlay.style.cssText = `
+  position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+  display: none; align-items: center; justify-content: center;
+  z-index: 100000; color: white; font-family: 'Dos', monospace;
+  flex-direction: column; text-align: center;
+`;
+cameraErrorOverlay.innerHTML = `
+  <div style="background:#000080; padding:30px; border:outset 4px #c0c0c0; max-width:500px;">
+    <h2 style="margin-top:0;">Camera Access Required</h2>
+    <p id="cameraErrorMsg">Unable to access the camera.</p>
+    <p style="font-size:14px;">Check your browser settings and make sure a camera is connected.</p>
+    <button id="retryCameraBtn" style="margin-top:15px; font-size:18px;">🔄 Retry</button>
+  </div>
+`;
+document.body.appendChild(cameraErrorOverlay);
+document.getElementById("retryCameraBtn").addEventListener("click", () => {
+  cameraErrorOverlay.style.display = "none";
+  startCamera(currentFacingMode);
+});
+
+// --- Modify startCamera() to use the overlay ---
+async function startCamera(facingMode = currentFacingMode) {
+  try {
+    if (currentStream) {
+      currentStream.getTracks().forEach(track => track.stop());
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: facingMode },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    });
+
+    currentStream = stream;
+    currentFacingMode = facingMode;
+
+    cameraFeed.srcObject = stream;
+    await cameraFeed.play();
+
+    if (!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+      switchCameraBtn.style.display = "none";
+    }
+
+    mirrored = currentFacingMode === "user";
+    syncOverlayMirror();
+    syncOverlaySize();
+
+    // Hide error overlay if it was shown
+    cameraErrorOverlay.style.display = "none";
+
+  } catch (error) {
+    console.error("Camera error:", error);
+    // Show the error overlay and hide loading screen (if still visible)
+    cameraErrorOverlay.style.display = "flex";
+    document.getElementById("cameraErrorMsg").textContent = error.message || "Cannot access camera.";
+    hideLoadingScreen(); // ensure boot screen disappears
+    // Still allow WebGL to render a black canvas so layout doesn't break
+    renderWebGL();
+  }
+}
+
 // =========================
 // INDEXED DB
 // =========================
@@ -79,34 +185,68 @@ function initDB() {
 async function addPhotoToDB(blob, type = "photo") {
   const db = await initDB();
 
+  // Generate thumbnail
+  let thumbnailBlob = null;
+  try {
+    const img = await createImageBitmap(blob);
+    const thumbCanvas = document.createElement("canvas");
+    const maxSize = 200; // max width/height
+    let w = img.width, h = img.height;
+    if (w > h) {
+      if (w > maxSize) { h = h * (maxSize / w); w = maxSize; }
+    } else {
+      if (h > maxSize) { w = w * (maxSize / h); h = maxSize; }
+    }
+    thumbCanvas.width = w;
+    thumbCanvas.height = h;
+    const tCtx = thumbCanvas.getContext("2d");
+    tCtx.drawImage(img, 0, 0, w, h);
+    thumbnailBlob = await new Promise(resolve => thumbCanvas.toBlob(resolve, "image/jpeg", 0.7));
+  } catch (e) {
+    console.warn("Thumbnail generation failed:", e);
+  }
+
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-
     const request = store.add({
       blob,
       type,
+      thumbnail: thumbnailBlob,   // can be null
       createdAt: Date.now()
     });
-
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = (event) => {
+      if (request.error?.name === "QuotaExceededError") {
+        alert("Storage full! Your photo could not be saved. Please delete some old photos.");
+      }
+      reject(request.error);
+    };
   });
 }
 
-async function getAllPhotosFromDB() {
+async function getAllPhotosFromDB(filter = {}) {
   const db = await initDB();
+  const tx = db.transaction(STORE_NAME, "readonly");
+  const store = tx.objectStore(STORE_NAME);
+  const request = store.getAll();
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.getAll();
-
     request.onsuccess = () => {
-      const results = request.result.sort((a, b) => b.createdAt - a.createdAt);
+      let results = request.result;
+      // Filter by type
+      if (filter.type) {
+        results = results.filter(item => item.type === filter.type);
+      }
+      // Sort
+      if (filter.sort === "oldest") {
+        results.sort((a, b) => a.createdAt - b.createdAt);
+      } else {
+        // default: newest first
+        results.sort((a, b) => b.createdAt - a.createdAt);
+      }
       resolve(results);
     };
-
     request.onerror = () => reject(request.error);
   });
 }
@@ -899,29 +1039,66 @@ async function startCamera(facingMode = currentFacingMode) {
 // =========================
 // FACE API MODEL LOADING
 // =========================
+
 async function loadFaceModels() {
   const MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
+  const FACE_LOAD_TIMEOUT = 10000; // 10 seconds
 
   try {
-    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-    await faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL);
+    // Race the model loading against a timeout
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Face model loading timed out")), FACE_LOAD_TIMEOUT)
+    );
 
+    await Promise.race([
+      Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL)
+      ]),
+      timeoutPromise
+    ]);
+
+    faceModelsLoaded = true;
     updateBootLine("boot2", "Loading Face Tracker...", true);
     updateBootLine("boot3", "Loading Filters...", true);
 
-    faceModelsLoaded = true;
-    detectFaceLoop();
-
     setTimeout(() => {
       updateBootLine("boot4", "Starting PhotoBruh...", true);
-
-      setTimeout(() => {
-        hideLoadingScreen();
-      }, 500);
+      setTimeout(hideLoadingScreen, 500);
     }, 300);
 
+    detectFaceLoop();
+
   } catch (err) {
-    console.error("Failed to load face models:", err);
+    console.error("Face models failed:", err);
+    // Still mark loading as done so boot screen hides
+    updateBootLine("boot2", "Face Tracker failed – disabled", true);
+    updateBootLine("boot3", "Filters unavailable", true);
+    faceModelsLoaded = false;
+
+    // Disable face‑filter UI
+    document.querySelectorAll(".face-filter-btn, .animated-filter-btn, .face-warp-btn")
+      .forEach(btn => btn.disabled = true);
+    const warpToggle = document.getElementById("faceWarpToggleBtn");
+    if (warpToggle) warpToggle.disabled = true;
+
+    // Show a small warning in the effects panel (if it exists)
+    const effectsList = document.getElementById("effectsList");
+    if (effectsList) {
+      const warn = document.createElement("p");
+      warn.style.color = "red";
+      warn.textContent = "⚠ Face filters unavailable (model load failed).";
+      effectsList.prepend(warn);
+    }
+
+    setTimeout(() => {
+      updateBootLine("boot4", "Starting PhotoBruh (no face filters)...", true);
+      setTimeout(hideLoadingScreen, 500);
+    }, 300);
+
+    // Still start the camera loop without face detection
+    renderWebGL();
+    renderOverlayLoop(); // overlay loop will still run (for animated effects only)
   }
 }
 
@@ -1721,6 +1898,12 @@ function takePhoto() {
     photo.style.display = "block";
     photo.style.opacity = "1";
 
+    photo.onclick = () => {
+      photo.classList.add("fade-out");
+      // remove after transition
+      photo.addEventListener("transitionend", handleFadeEnd, { once: true });
+    };
+
     const testImg = new Image();
     testImg.onload = () => {
       console.log("Captured size:", testImg.naturalWidth, testImg.naturalHeight);
@@ -1735,6 +1918,7 @@ function takePhoto() {
     editorBaseImage = new Image();
     editorBaseImage.onload = () => {
       console.log("Editor base image loaded");
+      resizeEditorCanvas(editorBaseImage);
       editorCanvas.style.display = "block";
       editorObjects  = [];
       redrawEditorCanvas();
@@ -1810,15 +1994,17 @@ async function updatePhotoCounter() {
   const total = await countPhotosInDB();
   const counter = document.getElementById("photoCounter");
   counter.textContent = `Photos Taken: ${total}`;
+
+  updateStorageInfo()
 }
 
 // =========================
 // GALLERY
 // =========================
-async function displayTakenPhotos() {
-  const photoContainer = document.getElementById("photoContainer");
-  const photos = await getAllPhotosFromDB();
+async function displayTakenPhotos(photosArray = null) {
+  const photos = photosArray || await getAllPhotosFromDB();
 
+  const photoContainer = document.getElementById("photoContainer");
   photoContainer.innerHTML = "";
 
   if (!photos.length) {
@@ -1826,33 +2012,48 @@ async function displayTakenPhotos() {
     return;
   }
 
-  photos.forEach((entry, index) => {
+  photos.forEach(entry => {
     const wrapper = document.createElement("div");
     wrapper.classList.add("photo-item");
 
-    const img = document.createElement("img");
-    const objectURL = URL.createObjectURL(entry.blob);
+    // Checkbox for batch delete
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.classList.add("photo-checkbox");
+    checkbox.dataset.id = entry.id;
+    checkbox.style.cssText = "position:absolute; top:5px; left:5px; z-index:5;";
 
+    const img = document.createElement("img");
+    // Use thumbnail if available, else full blob
+    const thumbnailBlob = entry.thumbnail || entry.blob;
+    const objectURL = URL.createObjectURL(thumbnailBlob);
     img.src = objectURL;
-    img.alt = `Saved Photo ${index + 1}`;
+    img.alt = `Photo ${entry.id}`;
     img.classList.add("saved-photo");
 
-    img.addEventListener("click", () => openPhotoModal(objectURL));
+    img.addEventListener("click", () => {
+      // When clicked, show full image in modal
+      openPhotoModal(URL.createObjectURL(entry.blob));
+    });
 
     const deleteBtn = document.createElement("button");
+    deleteBtn.setAttribute("aria-label", "Delete photo");
     deleteBtn.textContent = "Delete";
     deleteBtn.classList.add("delete-btn");
-
-    deleteBtn.addEventListener("click", async () => {
+    deleteBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
       soundManager.play("delete");
       await deletePhotoFromDB(entry.id);
       await displayTakenPhotos();
       await updatePhotoCounter();
     });
 
+    wrapper.appendChild(checkbox);
     wrapper.appendChild(img);
     wrapper.appendChild(deleteBtn);
     photoContainer.appendChild(wrapper);
+
+    updateStorageInfo()
   });
 }
 
@@ -1865,6 +2066,9 @@ function openPhotoModal(imageSrc) {
 
   modalImg.src = imageSrc;
   modal.style.display = "flex";
+
+  const closeBtn = modal.querySelector(".close-modal");
+  if (closeBtn) closeBtn.focus();
 }
 
 function closePhotoModal() {
@@ -1915,13 +2119,100 @@ document.addEventListener("DOMContentLoaded", async () => {
   syncOverlayMirror();
 });
 
+setTimeout(() => {
+  const loading = document.getElementById("loadingScreen");
+  if (loading && loading.style.display !== "none") {
+    console.warn("Forcing loading screen hide after 15 seconds.");
+    hideLoadingScreen();
+    cameraErrorOverlay.style.display = "flex"; // assume camera might have failed
+  }
+}, 15000);
+
+document.getElementById("deleteSelectedBtn").addEventListener("click", async () => {
+  const checkboxes = document.querySelectorAll(".photo-checkbox:checked");
+  if (!checkboxes.length) return alert("No photos selected.");
+  if (!confirm(`Delete ${checkboxes.length} photo(s)?`)) return;
+  soundManager.play("delete");
+  for (const cb of checkboxes) {
+    const id = Number(cb.dataset.id);
+    await deletePhotoFromDB(id);
+  }
+  await displayTakenPhotos();
+  await updatePhotoCounter();
+});
+
+document.getElementById("clearAllBtn").addEventListener("click", async () => {
+  if (!confirm("Delete ALL photos? This cannot be undone!")) return;
+  soundManager.play("delete");
+  const photos = await getAllPhotosFromDB();
+  for (const p of photos) {
+    await deletePhotoFromDB(p.id);
+  }
+  await displayTakenPhotos();
+  await updatePhotoCounter();
+});
+
+document.getElementById("sortSelect").addEventListener("change", async (e) => {
+  const value = e.target.value;
+  let filter = {};
+  if (value === "oldest") filter.sort = "oldest";
+  else if (value === "photos") filter.type = "photo";
+  else if (value === "strips") filter.type = "strip";
+  // else newest (default)
+  const photos = await getAllPhotosFromDB(filter);
+  // Directly re-render without re-fetching (to avoid double DB call)
+  // We'll adapt displayTakenPhotos to accept an array instead
+  await displayTakenPhotos(photos);
+});
+
+document.getElementById("exportZipBtn").addEventListener("click", async () => {
+  soundManager.play("click");
+  const photos = await getAllPhotosFromDB();
+  if (!photos.length) return alert("No photos to export.");
+  
+  const zip = new JSZip();
+  const folder = zip.folder("photobruh-photos");
+
+  for (let i = 0; i < photos.length; i++) {
+    const entry = photos[i];
+    const ext = entry.type === "strip" ? "png" : "webp";
+    folder.file(`photo_${i+1}_${Date.now()}.${ext}`, entry.blob);
+  }
+
+  const content = await zip.generateAsync({ type: "blob" });
+  const url = URL.createObjectURL(content);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "photobruh-photos.zip";
+  a.click();
+  URL.revokeObjectURL(url);
+  soundManager.play("success");
+});
+
+async function updateStorageInfo() {
+  if (!navigator.storage || !navigator.storage.estimate) {
+    document.getElementById("storageInfo").textContent = "Storage info not available.";
+    return;
+  }
+  const estimate = await navigator.storage.estimate();
+  const usedMB = (estimate.usage / 1024 / 1024).toFixed(1);
+  const quotaMB = (estimate.quota / 1024 / 1024).toFixed(1);
+  document.getElementById("storageInfo").textContent = 
+    `Storage: ${usedMB} MB used of ${quotaMB} MB`;
+}
+
+const contrastBtn = document.getElementById("contrastBtn");
+contrastBtn.addEventListener("click", () => {
+  document.body.classList.toggle("high-contrast");
+  const isHC = document.body.classList.contains("high-contrast");
+  contrastBtn.textContent = isHC ? "High Contrast: On" : "High Contrast: Off";
+});
+
 function syncOverlaySize() {
   const rect = glCanvas.getBoundingClientRect();
   overlayCanvas.width  = rect.width;
   overlayCanvas.height = rect.height;
 }
-
-// In script.js
 
 function syncOverlayMirror() {
   overlayCanvas.style.transform = mirrored ? "scaleX(-1)" : "scaleX(1)";

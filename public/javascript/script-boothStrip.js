@@ -114,48 +114,44 @@ function capturePhotoToDataURL() {
   }
 
   const context = canvas.getContext("2d");
-  const visible = getVisibleVideoRect();
-
-  const width = visible.drawW;
-  const height = visible.drawH;
-
+  const width = glCanvas.width;   // 1280
+  const height = glCanvas.height; // 720
   canvas.width = width;
   canvas.height = height;
 
   context.clearRect(0, 0, width, height);
   context.save();
 
+  // Apply visual filters (brightness, contrast, etc.)
   if (effectsManager.hasActiveEffects()) {
     context.filter = effectsManager.buildFilterString();
   }
 
-  context.drawImage(
-    glCanvas,
-    visible.offsetX, visible.offsetY, visible.drawW, visible.drawH,
-    0, 0, width, height
-  );
+  // 1. Draw the main WebGL canvas (which already has crop + visual effects)
+  context.drawImage(glCanvas, 0, 0);
 
+  // 2. Add mirrored overlays manually (face filters, animations)
   if (mirrored) {
-      context.save();
-      context.translate(width, 0);
-      context.scale(-1, 1);
+    context.save();
+    context.translate(width, 0);
+    context.scale(-1, 1);
   }
 
   if (activeFaceFilter && trackedFaces.length) {
-      trackedFaces.forEach((face, i) => {
-          drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
-      });
+    trackedFaces.forEach((face, i) => {
+      drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
+    });
   }
 
   if (
-      activeAnimatedFilter &&
-      ["sparkles", "snow", "hearts", "matrix"].includes(activeAnimatedFilter)
+    activeAnimatedFilter &&
+    ["sparkles", "snow", "hearts", "matrix"].includes(activeAnimatedFilter)
   ) {
-      drawAnimatedFilter(context);
+    drawAnimatedFilter(context);
   }
 
   if (mirrored) {
-      context.restore();
+    context.restore();
   }
 
   context.restore();

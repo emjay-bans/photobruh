@@ -25,49 +25,142 @@ const stickerAssets = {
   waitImGoated: new Image()
 };
 
-stickerAssets.parentalAdv.src = "https://emjay-bans.github.io/photobruh/public/assets/stickers/parentalAdv.png";
-stickerAssets.sunglasses.src = "https://emjay-bans.github.io/photobruh/public/assets/stickers/sunglasses.png";
-stickerAssets.swag.src = "https://emjay-bans.github.io/photobruh/public/assets/stickers/swag.png";
-stickerAssets.waitImGoated.src = "https://emjay-bans.github.io/photobruh/public/assets/stickers/waitImGoated.png";
+stickerAssets.parentalAdv.src = "public/assets/stickers/parentalAdv.png";
+stickerAssets.sunglasses.src = "public/assets/stickers/sunglasses.png";
+stickerAssets.swag.src = "public/assets/stickers/swag.png";
+stickerAssets.waitImGoated.src = "public/assets/stickers/waitImGoated.png";
+
+function resizeEditorCanvas(baseImage) {
+  if (!baseImage) return;
+
+  const maxWidth = 1140; // keep the same max width as before
+  const naturalAspect = baseImage.naturalWidth / baseImage.naturalHeight;
+
+  // Calculate new canvas dimensions maintaining the image's aspect ratio
+  let canvasWidth = maxWidth;
+  let canvasHeight = maxWidth / naturalAspect;
+
+  // If the height would exceed the previous height (641.25), scale by height instead
+  // (optional – you can decide to keep width fixed)
+  // For better UX, we'll limit the height to 641.25 as well to avoid extreme tall canvases.
+  const maxHeight = 641.25;
+  if (canvasHeight > maxHeight) {
+    canvasHeight = maxHeight;
+    canvasWidth = maxHeight * naturalAspect;
+  }
+
+  editorCanvas.width = canvasWidth;
+  editorCanvas.height = canvasHeight;
+
+  // Also update placeholder to match (just for visual consistency)
+  const placeholder = document.getElementById("placeholder");
+  if (placeholder) {
+    placeholder.width = canvasWidth;
+    placeholder.height = canvasHeight;
+  }
+
+  // Update the CSS of the parent so it scales nicely
+  const wrapper = editorCanvas.parentElement;
+  if (wrapper) {
+    wrapper.style.width = canvasWidth + "px";
+    wrapper.style.height = canvasHeight + "px";
+  }
+
+  // Redraw after resize
+  redrawEditorCanvas();
+}
 
 function addSticker(type) {
   const img = stickerAssets[type];
   if (!img) return;
 
+  // Wait for the image to be loaded if it hasn't already
+  if (!img.complete) {
+    img.onload = () => placeSticker(img);
+  } else {
+    placeSticker(img);
+  }
+
+  soundManager.play("click");
+}
+
+function placeSticker(img) {
+  const MAX_SIZE = 240; // maximum width or height
+  let width = img.naturalWidth;
+  let height = img.naturalHeight;
+
+  if (width > height) {
+    if (width > MAX_SIZE) {
+      height = (MAX_SIZE / width) * height;
+      width = MAX_SIZE;
+    }
+  } else {
+    if (height > MAX_SIZE) {
+      width = (MAX_SIZE / height) * width;
+      height = MAX_SIZE;
+    }
+  }
+
   editorObjects.push({
     type: "sticker",
     img,
-    x: editorCanvas.width / 2 - 60,
-    y: editorCanvas.height / 2 - 60,
-    width: 240,
-    height: 240,
+    x: editorCanvas.width / 2 - width / 2,
+    y: editorCanvas.height / 2 - height / 2,
+    width,
+    height,
     rotation: 0
   });
 
-  soundManager.play("click");
-  
   redrawEditorCanvas();
 }
 
 function addText() {
-  const userText = prompt("Enter your text:");
-  if (!userText) return;
+  const input = document.getElementById("textInputOverlay");
+  if (!input) return;
 
-  editorObjects.push({
-    type: "text",
-    text: userText,
-    x: editorCanvas.width / 2 - 150,
-    y: editorCanvas.height / 2 - 40,
-    width: 300,
-    height: 80,
-    rotation: 0,
-    fontSize: 64,
-    fontFamily: "Impact",
-    color: "white",
-    stroke: "black"
-  });
+  input.style.display = "block";
+  input.value = "";
+  input.focus({ preventScroll: true });
 
-  redrawEditorCanvas();
+  const commitText = () => {
+    const userText = input.value.trim();
+    input.style.display = "none";
+    input.removeEventListener("blur", commitText);
+    input.removeEventListener("keydown", onKey);
+    input.removeEventListener("pointerdown", preventClose);
+
+    if (userText) {
+      editorObjects.push({
+        type: "text",
+        text: userText,
+        x: editorCanvas.width / 2 - 150,
+        y: editorCanvas.height / 2 - 40,
+        width: 300,
+        height: 80,
+        rotation: 0,
+        fontSize: 64,
+        fontFamily: "Impact",
+        color: "white",
+        stroke: "black"
+      });
+      redrawEditorCanvas();
+    }
+  };
+
+  const onKey = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitText();
+    }
+  };
+
+  const preventClose = (e) => {
+    e.stopPropagation();
+  };
+
+  input.addEventListener("blur", commitText);
+  input.addEventListener("keydown", onKey);
+  input.addEventListener("pointerdown", preventClose);
 }
 
 function redrawEditorCanvas() {

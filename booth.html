@@ -320,7 +320,7 @@
 
   <div id="boothContainer">
     <!-- Settings gear button (operator only) -->
-    <button id="settingsBtn" title="Filter Settings">⚙️</button>
+    <button id="settingsBtn" title="Filter Settings" aria-label="Open settings">⚙️</button>
 
     <div id="cameraWrapper">
       <video id="cameraFeed" autoplay playsinline muted style="position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;"></video>
@@ -330,9 +330,9 @@
     </div>
 
     <div id="buttonZone">
-      <button id="startStripBtn" class="booth-btn">📸 Start Photo Strip</button>
-      <button id="downloadBoothBtn" class="booth-btn" style="display:none;">⬇️ Download Strip</button>
-      <button id="printBoothBtn" class="booth-btn" style="display:none;">🖨️ Print Strip</button>
+      <button id="startStripBtn" class="booth-btn" aria-label="Start photo strip">📸 Start Photo Strip</button>
+      <button id="downloadBoothBtn" class="booth-btn" style="display:none;" aria-label="Download strip">⬇️ Download Strip</button>
+      <button id="printBoothBtn" class="booth-btn" style="display:none;" aria-label="Print strip">🖨️ Print Strip</button>
     </div>
 
     <div id="statusText" style="font-family: 'Dos';"></div>
@@ -502,6 +502,33 @@
       settingsBtn.addEventListener('click', () => {
         soundManager.play('click');
         settingsOverlay.style.display = 'flex';
+        // Focus the first focusable element inside
+        const firstBtn = settingsOverlay.querySelector('button');
+        if (firstBtn) firstBtn.focus();
+      });
+
+      // Trap focus inside settings overlay
+      settingsOverlay.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          settingsOverlay.style.display = 'none';
+          settingsBtn.focus();
+        }
+        if (e.key === 'Tab') {
+          const focusable = settingsOverlay.querySelectorAll('button, [href], input, select, textarea');
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (e.shiftKey) {
+            if (document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            }
+          } else {
+            if (document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }
       });
 
       closeSettingsBtn.addEventListener('click', () => {

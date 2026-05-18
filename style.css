@@ -427,6 +427,16 @@ button:active {
     border: outset 4px var(--border-light);
 }
 
+#editorContainer {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+#editorCanvas {
+  max-width: 100%;
+  height: auto; /* actual height will be set by JS */
+}
+
 #loadingScreen {
   position: fixed;
   inset: 0;
@@ -484,4 +494,38 @@ button:active {
 
 #glCanvas {
     display: block;
+}
+
+/* High contrast mode via media query */
+@media (forced-colors: active) {
+  button {
+    forced-color-adjust: auto;
+  }
+  #glCanvas {
+    border: 2px solid ButtonText;
+  }
+}
+
+/* Optional manual high-contrast theme triggered by a class on body */
+body.high-contrast {
+  --bg-main: #000;
+  --bg-panel: #1a1a1a;
+  --bg-panel-dark: #004040;
+  --text-main: #fff;
+  --text-light: #fff;
+  --accent: #00ffff;
+  --border-light: #ccc;
+  --border-dark: #666;
+  filter: none;
+  background: #000;
+}
+
+body.high-contrast button {
+  border: 2px solid #fff;
+  color: #fff;
+  background: #000;
+}
+
+#photo {
+  cursor: pointer;
 }
