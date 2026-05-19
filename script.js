@@ -1621,19 +1621,30 @@ function compositeFrame() {
 
   recordCtx.clearRect(0, 0, recordCanvas.width, recordCanvas.height);
 
-  // 1. Draw the WebGL canvas (mirror handled by its shader)
+  // 1. Draw the WebGL canvas (mirroring is handled by its shader)
   recordCtx.drawImage(glCanvas, 0, 0);
 
-  // 2. Apply CSS visual effects to the overlay layer
+  // 2. Mirror the overlay canvas to match the live preview
+  if (mirrored) {
+    recordCtx.save();
+    recordCtx.translate(recordCanvas.width, 0);
+    recordCtx.scale(-1, 1);
+  }
+
+  // 3. Apply current visual effects (brightness, contrast, etc.)
   if (effectsManager.hasActiveEffects()) {
     recordCtx.filter = effectsManager.buildFilterString();
   }
 
-  // 3. Draw the overlay canvas AS-IS (it already contains mirrored content)
+  // 4. Draw the overlay canvas (face filters, animated effects, image overlay)
   recordCtx.drawImage(overlayCanvas, 0, 0);
 
-  // 4. Reset filter
+  // 5. Reset filter
   recordCtx.filter = 'none';
+
+  if (mirrored) {
+    recordCtx.restore();
+  }
 }
 
 // ==============================
