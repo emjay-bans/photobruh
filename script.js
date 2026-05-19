@@ -64,7 +64,7 @@ let currentFaceData     = null;
 let lastValidFaceData   = null;
 let lastFaceTime        = 0;
 let lastMediaPipeSend   = 0;
-const MEDIAPIPE_INTERVAL = 60;
+const MEDIAPIPE_INTERVAL = 100;
 const FACE_HOLD_DURATION = 500;
 
 // Transforms & smoothing
@@ -106,7 +106,7 @@ let overlayDirty = true;   // start dirty so first frame draws
 
 // Overlay intervals
 let lastOverlayFrame = 0;
-const OVERLAY_INTERVAL = 33;
+const OVERLAY_INTERVAL = 13;
 
 // ==============================
 // WEBCANVAS / OVERLAY CANVAS
@@ -490,7 +490,9 @@ const fragmentShaderSource = `
       color = mix(color, 1.0 - color, uInvert);
 
       // Your original animated‑effects call:
-      color = applyAnimatedFX(uv, color);   // keep as‑is (uses original uv)
+      if (uAnimMode != 0) {
+          color = applyAnimatedFX(uv, color);
+      }
 
       gl_FragColor = vec4(clamp(color, 0.0, 1.0), tex.a);
   }
@@ -724,7 +726,7 @@ function initWebGL() {
 // ==============================
 // WEBCANVAS RENDER LOOP
 // ==============================
-function renderWebGL() {
+function renderWebGLFrame() {
   if (cameraFeed.readyState >= 2) {
     gl.viewport(0, 0, glCanvas.width, glCanvas.height);
     gl.bindTexture(gl.TEXTURE_2D, videoTexture);
@@ -803,7 +805,6 @@ function renderWebGL() {
     gl.uniform2f(uCropScale, cropW, cropH);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
-  requestAnimationFrame(renderWebGL);
 }
 
 // ==============================
@@ -886,7 +887,7 @@ async function startCamera(facingMode = currentFacingMode) {
   try {
     if (currentStream) currentStream.getTracks().forEach(t => t.stop());
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: facingMode }, width: { ideal: 640 }, height: { ideal: 360 } }
+      video: { facingMode: { ideal: facingMode }, width: { ideal: 480 }, height: { ideal: 270 } }
     });
     currentStream = stream;
     currentFacingMode = facingMode;
@@ -904,7 +905,7 @@ async function startCamera(facingMode = currentFacingMode) {
     cameraErrorOverlay.style.display = "flex";
     document.getElementById("cameraErrorMsg").textContent = error.message || "Cannot access camera.";
     hideLoadingScreen();
-    renderWebGL();
+    renderWebGLFrame();
   }
 }
 
@@ -1314,20 +1315,20 @@ function resetAnimatedFilterState() {
 // ==============================
 // OVERLAY RENDER LOOP
 // ==============================
-function renderOverlayLoop() {
+function renderOverlayFrame() {
   const now = performance.now();
 
-  if (now - lastOverlayFrame < OVERLAY_INTERVAL) {
-    requestAnimationFrame(renderOverlayLoop);
-    return;
-  }
+  // if (now - lastOverlayFrame < OVERLAY_INTERVAL) {
+  //   requestAnimationFrame(renderOverlayFrame);
+  //   return;
+  // }
   lastOverlayFrame = now;
 
   // If no filters are active and nothing has changed, skip
-  if (!activeAnimatedFilter && activeFaceFilters.length === 0 && !overlayDirty) {
-    requestAnimationFrame(renderOverlayLoop);
-    return;
-  }
+  // if (!activeAnimatedFilter && activeFaceFilters.length === 0 && !overlayDirty) {
+  //   requestAnimationFrame(renderOverlayFrame);
+  //   return;
+  // }
 
   overlayDirty = false;   // we are about to draw, mark clean
 
@@ -1366,7 +1367,6 @@ function renderOverlayLoop() {
   }
 
   animationFrameCount++;
-  requestAnimationFrame(renderOverlayLoop);
 }
 
 // ==============================
@@ -1386,6 +1386,10 @@ function takePhoto() {
   if (effectsManager.hasActiveEffects()) context.filter = effectsManager.buildFilterString();
   soundManager.play("shutter");
   context.drawImage(glCanvas, 0, 0);
+
+  if (effectsManager.hasActiveEffects()) {
+    context.filter = effectsManager.buildFilterString();  // applied to subsequent draws
+  }
 
   // Use snapshot
   const facesToDraw = snapshotFaces || [];
@@ -1438,6 +1442,8 @@ function takePhoto() {
     photo.classList.add("fade-out");
     photo.addEventListener("transitionend", handleFadeEnd(), { once: true });
   }, 2000);
+
+  context.filter = 'none';
 }
 
 function handleFadeEnd() {
@@ -1562,20 +1568,45 @@ function closePhotoModal() {
 // ==============================
 function compositeFrame() {
   if (!recordCtx) return;
+
   recordCtx.clearRect(0, 0, recordCanvas.width, recordCanvas.height);
+
+  // 1. Draw the WebGL canvas (already has visual effects via shader)
   recordCtx.drawImage(glCanvas, 0, 0);
+
+  // 2. Handle mirroring
   if (mirrored) {
-    recordCtx.save(); recordCtx.translate(recordCanvas.width, 0); recordCtx.scale(-1, 1);
+    recordCtx.save();
+    recordCtx.translate(recordCanvas.width, 0);
+    recordCtx.scale(-1, 1);
   }
+
+  // 3. Apply current visual effects to the overlay layer
+  if (effectsManager.hasActiveEffects()) {
+    recordCtx.filter = effectsManager.buildFilterString();
+  } else {
+    recordCtx.filter = 'none';
+  }
+
+  // 4. Draw the overlay canvas (face filters, animations)
   recordCtx.drawImage(overlayCanvas, 0, 0);
-  if (mirrored) recordCtx.restore();
+
+  // 5. Reset filter to avoid affecting future operations
+  recordCtx.filter = 'none';
+
+  if (mirrored) {
+    recordCtx.restore();
+  }
 }
 
 // ==============================
 // VIDEO RECORDING
 // ==============================
-function startVideoRecording() {
-  compositeFrame();                          // initial frame
+let recordingStart = 0;
+let progressInterval = null;
+
+async function startVideoRecording() {
+  compositeFrame();
   const stream = recordCanvas.captureStream(30);
   recordedChunks = [];
 
@@ -1589,6 +1620,7 @@ function startVideoRecording() {
   };
 
   mediaRecorder.onstop = async () => {
+    clearInterval(progressInterval);   // stop the progress updater
     const blob = new Blob(recordedChunks, { type: mimeType });
     await addPhotoToDB(blob, "video", recordCanvas);
     await displayTakenPhotos();
@@ -1599,6 +1631,7 @@ function startVideoRecording() {
     cancelAnimationFrame(recordingRAF);
   };
 
+  // Continuously update the record canvas while recording
   const updateFrameLoop = () => {
     if (!isRecording) return;
     compositeFrame();
@@ -1608,6 +1641,14 @@ function startVideoRecording() {
 
   mediaRecorder.start();
   isRecording = true;
+  recordingStart = Date.now();
+
+  // Show live elapsed time
+  progressInterval = setInterval(() => {
+    const elapsed = ((Date.now() - recordingStart) / 1000).toFixed(1);
+    document.getElementById("recordingStatus").textContent = `🔴 Recording ${elapsed}s / 5s`;
+  }, 100);
+
   document.getElementById("recordingStatus").style.display = "inline";
   soundManager.play("shutter");
 
@@ -1648,23 +1689,30 @@ async function recordGIF() {
   const frameInterval = 1000 / fps;
 
   soundManager.play("shutter");
-  status.textContent = "🔴 Capturing frames...";
   status.style.display = "inline";
+
+  const tempCanvas = document.createElement("canvas");
+  tempCanvas.width = recordCanvas.width;
+  tempCanvas.height = recordCanvas.height;
+  const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
 
   for (let i = 0; i < frameCount; i++) {
     compositeFrame();
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = recordCanvas.width;
-    tempCanvas.height = recordCanvas.height;
-    tempCanvas.getContext("2d").drawImage(recordCanvas, 0, 0);
-    gif.addFrame(tempCanvas, { delay: frameInterval });
+    tempCtx.drawImage(recordCanvas, 0, 0);
+    const frameData = tempCtx.getImageData(0, 0, recordCanvas.width, recordCanvas.height);
+    gif.addFrame(frameData, { delay: frameInterval });
+
+    // Show progress
+    status.textContent = `🔴 Capturing frame ${i + 1}/${frameCount}`;
     await new Promise(resolve => setTimeout(resolve, frameInterval));
   }
 
+  // Poster frame
   const posterCanvas = document.createElement("canvas");
   posterCanvas.width = recordCanvas.width;
   posterCanvas.height = recordCanvas.height;
-  posterCanvas.getContext("2d").drawImage(recordCanvas, 0, 0);
+  const posterCtx = posterCanvas.getContext("2d", { willReadFrequently: true });
+  posterCtx.drawImage(recordCanvas, 0, 0);
 
   status.textContent = "⏳ Processing GIF...";
 
@@ -1695,25 +1743,30 @@ async function recordBoomerang() {
   const totalFrames = Math.floor((fps * recordDuration) / 1000);
 
   soundManager.play("shutter");
-  status.textContent = "🔴 Capturing boomerang...";
   status.style.display = "inline";
 
   const forwardFrames = [];
+  const tempCanvas = document.createElement("canvas");
+  tempCanvas.width = recordCanvas.width;
+  tempCanvas.height = recordCanvas.height;
+  const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
 
   for (let i = 0; i < totalFrames; i++) {
     compositeFrame();
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = recordCanvas.width;
-    tempCanvas.height = recordCanvas.height;
-    tempCanvas.getContext("2d").drawImage(recordCanvas, 0, 0);
-    forwardFrames.push(tempCanvas);
+    tempCtx.drawImage(recordCanvas, 0, 0);
+    const frameData = tempCtx.getImageData(0, 0, recordCanvas.width, recordCanvas.height);
+    forwardFrames.push(frameData);
+
+    // Show progress
+    status.textContent = `🔴 Capturing boomerang ${i + 1}/${totalFrames}`;
     await new Promise(resolve => setTimeout(resolve, frameInterval));
   }
 
   const posterCanvas = document.createElement("canvas");
   posterCanvas.width = recordCanvas.width;
   posterCanvas.height = recordCanvas.height;
-  posterCanvas.getContext("2d").drawImage(recordCanvas, 0, 0);
+  const posterCtx = posterCanvas.getContext("2d", { willReadFrequently: true });
+  posterCtx.drawImage(recordCanvas, 0, 0);
 
   status.textContent = "⏳ Processing boomerang...";
 
@@ -1725,7 +1778,7 @@ async function recordBoomerang() {
     workerScript: gifWorkerBlobURL
   });
 
-  forwardFrames.forEach(canvas => gif.addFrame(canvas, { delay: frameInterval }));
+  forwardFrames.forEach(data => gif.addFrame(data, { delay: frameInterval }));
   for (let i = forwardFrames.length - 2; i >= 0; i--) {
     gif.addFrame(forwardFrames[i], { delay: frameInterval });
   }
@@ -1767,18 +1820,6 @@ function syncOverlaySize() {
   });
 
   faceModelsLoaded = true;
-  renderWebGL();
-  renderOverlayLoop();
-
-  function mediaPipeLoop() {
-    const now = performance.now();
-    if (mediaPipeReady && cameraFeed.readyState >= 2 && now - lastMediaPipeSend >= MEDIAPIPE_INTERVAL) {
-      sendFrameToMediaPipe();
-      lastMediaPipeSend = now;
-    }
-    requestAnimationFrame(mediaPipeLoop);
-  }
-  mediaPipeLoop();
 
   effectsManager.syncOverlayFilter();
 
@@ -1790,6 +1831,40 @@ function syncOverlaySize() {
     setTimeout(hideLoadingScreen, 500);
   }, 300);
 })();
+
+// ---- Master animation loop (single rAF) ----
+let lastWebGLTime = 0;
+let lastOverlayTime = 0;
+const WEBGL_INTERVAL = 13;     // ~30 fps
+
+function masterLoop(now) {
+  // 1. WebGL rendering (throttled)
+  if (now - lastWebGLTime >= WEBGL_INTERVAL) {
+    lastWebGLTime = now;
+    renderWebGLFrame();   // renamed from renderWebGL to avoid confusion
+  }
+
+  // 2. Overlay rendering (throttled + dirty‑check)
+  if (now - lastOverlayTime >= OVERLAY_INTERVAL) {
+    lastOverlayTime = now;
+    renderOverlayFrame(); // renamed from renderOverlayLoop
+  }
+
+  // 3. MediaPipe frame sending (uses its own internal throttle)
+  sendFrameToMediaPipeIfReady(now);
+
+  requestAnimationFrame(masterLoop);
+}
+
+// Start the loop after everything is initialised
+requestAnimationFrame(masterLoop);
+
+function sendFrameToMediaPipeIfReady(now) {
+  if (mediaPipeReady && cameraFeed.readyState >= 2 && now - lastMediaPipeSend >= MEDIAPIPE_INTERVAL) {
+    sendFrameToMediaPipe();
+    lastMediaPipeSend = now;
+  }
+}
 
 // Safety timeout
 setTimeout(() => {
@@ -1877,6 +1952,7 @@ document.querySelectorAll(".face-filter-btn").forEach(btn => {
       } else {
         activeFaceFilters.push(selected);     // add it
       }
+      overlayDirty = true
     }
 
     // Update button active states
@@ -1887,8 +1963,6 @@ document.querySelectorAll(".face-filter-btn").forEach(btn => {
       const button = document.querySelector(`.face-filter-btn[data-filter="${f}"]`);
       if (button) button.classList.add("active");
     });
-
-    overlayDirty = true
   });
 });
 
@@ -1896,10 +1970,9 @@ document.querySelectorAll(".face-filter-btn").forEach(btn => {
 document.querySelectorAll(".animated-filter-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     activeAnimatedFilter = btn.dataset.anim === "none" ? null : btn.dataset.anim;
+    overlayDirty = true
     resetAnimatedFilterState();
   });
-
-  overlayDirty = true
 });
 
 // Face warp buttons
@@ -1907,6 +1980,7 @@ document.querySelectorAll(".face-warp-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     faceWarpMode = parseInt(btn.dataset.mode);
     faceWarpEnabled = true;
+    overlayDirty = true
     document.getElementById("faceWarpToggleBtn").textContent = "Face Warp: On";
   });
 });
