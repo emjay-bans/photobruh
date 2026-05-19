@@ -536,3 +536,10 @@ body.no-crt .pixel::before {
 body.no-crt::after {
   display: none;
 }
+
+.face-filter-btn.active {
+  border: 2px solid var(--accent);
+  background-color: var(--bg-panel-dark);
+  color: white;
+  box-shadow: 0 0 8px var(--accent);
+}

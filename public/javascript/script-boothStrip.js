@@ -149,10 +149,12 @@ function capturePhotoToDataURL() {
   }
 
   // Draw face filters (including glasses, dog, etc.)
-  if (activeFaceFilter && facesToDraw.length > 0) {
+  if (activeFaceFilters.length > 0 && facesToDraw.length > 0) {
     facesToDraw.forEach((face, i) => {
-      const t = transformsToUse[i] || { x:0, y:0, angle:0, scale:1, noseLocalX:0, noseLocalY:0 };
-      drawFaceFilterMediaPipe(context, face, t, activeFaceFilter, false);
+      const t = transformsToUse[i] || { x:0,y:0,angle:0,scale:1,noseLocalX:0,noseLocalY:0 };
+      activeFaceFilters.forEach(filterType => {
+        drawFaceFilterMediaPipe(context, face, t, filterType, false);
+      });
     });
   }
 

@@ -52,7 +52,7 @@ let currentStream       = null;
 let mirrored            = false;
 
 // Face filters
-let activeFaceFilter    = null;
+let activeFaceFilters = [];   // now allows multiple filters from different groups
 let activeAnimatedFilter = null;
 let activeARFilter      = null;   // reserved for future AR-only filters
 let faceModelsLoaded    = false;
@@ -100,6 +100,13 @@ let gifWorkerBlobURL    = null;
 // Themes of website
 const themes = ["win95", "amber", "matrix", "vaporwave"];
 let currentTheme = 0;
+
+// Overlay dirty
+let overlayDirty = true;   // start dirty so first frame draws
+
+// Overlay intervals
+let lastOverlayFrame = 0;
+const OVERLAY_INTERVAL = 33;
 
 // ==============================
 // WEBCANVAS / OVERLAY CANVAS
@@ -569,6 +576,7 @@ class EffectsManager {
   updateEffect(key, value) {
     this.effects[key] = value;
     this.applyEffects();
+    this.syncOverlayFilter();
   }
 
   applyEffects() {
@@ -592,10 +600,10 @@ class EffectsManager {
 
   applyPreset(presetName) {
     const presets = {
-      bw: { grayscale: 100, brightness: 100, blur: 0, contrast: 100, hue: 0, invert: 0, saturate: 0, sepia: 0 },
+      bw:    { grayscale: 100, brightness: 100, blur: 0, contrast: 100, hue: 0, invert: 0, saturate: 0, sepia: 0 },
       sepia: { grayscale: 0, brightness: 100, blur: 0, contrast: 100, hue: 0, invert: 0, saturate: 100, sepia: 100 },
-      cool: { grayscale: 0, brightness: 100, blur: 0, contrast: 120, hue: 200, invert: 0, saturate: 80, sepia: 0 },
-      warm: { grayscale: 0, brightness: 110, blur: 0, contrast: 90, hue: 30, invert: 0, saturate: 120, sepia: 20 },
+      cool:  { grayscale: 0, brightness: 100, blur: 0, contrast: 120, hue: 200, invert: 0, saturate: 80, sepia: 0 },
+      warm:  { grayscale: 0, brightness: 110, blur: 0, contrast: 90, hue: 30, invert: 0, saturate: 120, sepia: 20 },
       night: { grayscale: 0, brightness: 150, blur: 0, contrast: 140, hue: 200, invert: 0, saturate: 50, sepia: 0 },
       vivid: { grayscale: 0, brightness: 100, blur: 0, contrast: 150, hue: 0, invert: 0, saturate: 150, sepia: 0 }
     };
@@ -604,6 +612,7 @@ class EffectsManager {
       this.effects = { ...presets[presetName] };
       this.updateSliderUI();
       this.applyEffects();
+      this.syncOverlayFilter();
     }
   }
 
@@ -615,17 +624,12 @@ class EffectsManager {
 
   reset() {
     this.effects = {
-      grayscale: 0,
-      brightness: 100,
-      blur: 0,
-      contrast: 100,
-      hue: 0,
-      invert: 0,
-      saturate: 100,
-      sepia: 0
+      grayscale: 0, brightness: 100, blur: 0, contrast: 100,
+      hue: 0, invert: 0, saturate: 100, sepia: 0
     };
     this.updateSliderUI();
     this.applyEffects();
+    this.syncOverlayFilter();
   }
 
   hasActiveEffects() {
@@ -634,6 +638,11 @@ class EffectsManager {
       const defaultValue = defaults[key] ?? 0;
       return value !== defaultValue;
     });
+  }
+
+  syncOverlayFilter() {
+    const filterString = this.buildFilterString();
+    overlayCanvas.style.filter = filterString;
   }
 }
 
@@ -838,6 +847,19 @@ faceFilterAssets.woah.nose.src     = "public/assets/filters/woahShocked.png";
 faceFilterAssets.shrek.ears.src    = "public/assets/filters/shrekEars.png";
 faceFilterAssets.glasses.ears.src  = "public/assets/filters/sunglasses.png";
 
+// Slots used by each filter – filters sharing a slot are mutually exclusive
+const filterSlots = {
+  dog:      ['ears', 'nose'],
+  cat:      ['ears', 'nose'],
+  rabbid:   ['ears', 'nose'],
+  minion:   ['ears'],
+  shrek:    ['ears'],
+  mustache: ['mustache'],
+  lorax:    ['nose'],
+  woah:     ['nose'],
+  glasses:  ['glasses']
+};
+
 // ==============================
 // CAMERA
 // ==============================
@@ -903,6 +925,7 @@ async function initMediaPipe() {
         headPose: results.multiFaceGeometry ? results.multiFaceGeometry[results.multiFaceLandmarks.indexOf(landmarks)] : null
       }));
       currentFaceData = { faces };
+      overlayDirty = true
       lastValidFaceData = currentFaceData;
       lastFaceTime = performance.now();
     } else {
@@ -1078,9 +1101,9 @@ function drawFaceFilterMediaPipe(ctx, face, transform, filterType, useSmoothing 
 
   // --- GLASSES ---
   if (filterType === 'glasses') {
-    const gw = 220 * finalScale, gh = gw * 0.4;
+    const gw = 250 * finalScale, gh = gw * 1;
     ctx.save(); ctx.translate(finalX, finalY); ctx.rotate(finalAngle);
-    ctx.drawImage(assets.ears, -gw/2, -gh/2, gw, gh);
+    ctx.drawImage(assets.ears, -gw/2, -gh/2 + 10, gw, gh);
     ctx.restore();
     return;
   }
@@ -1117,7 +1140,7 @@ function drawFaceFilterMediaPipe(ctx, face, transform, filterType, useSmoothing 
     const noseOffX = useSmoothing ? (transform.noseLocalX = lerp(transform.noseLocalX, localX, 1 - FILTER_SMOOTHING)) : localX;
     let noseOffY = useSmoothing ? (transform.noseLocalY = lerp(transform.noseLocalY, localY, 1 - FILTER_SMOOTHING)) : localY;
 
-    const yOff = { dog: 0, cat: 20, mustache: 35, rabbid: 60, lorax: -10 };
+    const yOff = { dog: 0, cat: 20, mustache: 25, rabbid: 60, lorax: -10 };
     noseOffY += (yOff[filterType] || 0) * finalScale;
 
     let nw, nh;
@@ -1292,9 +1315,24 @@ function resetAnimatedFilterState() {
 // OVERLAY RENDER LOOP
 // ==============================
 function renderOverlayLoop() {
+  const now = performance.now();
+
+  if (now - lastOverlayFrame < OVERLAY_INTERVAL) {
+    requestAnimationFrame(renderOverlayLoop);
+    return;
+  }
+  lastOverlayFrame = now;
+
+  // If no filters are active and nothing has changed, skip
+  if (!activeAnimatedFilter && activeFaceFilters.length === 0 && !overlayDirty) {
+    requestAnimationFrame(renderOverlayLoop);
+    return;
+  }
+
+  overlayDirty = false;   // we are about to draw, mark clean
+
   overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-  const now = performance.now();
   const faceLostTooLong = now - lastFaceTime > FACE_HOLD_DURATION;
   let facesToDraw = [];
   if (currentFaceData && currentFaceData.faces.length > 0) {
@@ -1309,11 +1347,13 @@ function renderOverlayLoop() {
   }
   dogTransforms.length = facesToDraw.length;
 
-  // Draw face filters
-  if (activeFaceFilter && facesToDraw.length > 0) {
+  // Draw face filters (only if active)
+  if (activeFaceFilters.length > 0 && facesToDraw.length > 0) {
     overlayCtx.save();
     facesToDraw.forEach((face, i) => {
-      drawFaceFilterMediaPipe(overlayCtx, face, dogTransforms[i], activeFaceFilter, true);
+      activeFaceFilters.forEach(filterType => {
+        drawFaceFilterMediaPipe(overlayCtx, face, dogTransforms[i], filterType, true);
+      });
     });
     overlayCtx.restore();
   }
@@ -1353,10 +1393,12 @@ function takePhoto() {
 
   if (mirrored) { context.save(); context.translate(outputWidth, 0); context.scale(-1, 1); }
 
-  if (activeFaceFilter && facesToDraw.length > 0) {
+  if (activeFaceFilters.length > 0 && facesToDraw.length > 0) {
     facesToDraw.forEach((face, i) => {
-      const t = transformsToUse[i] || { x:0, y:0, angle:0, scale:1, noseLocalX:0, noseLocalY:0 };
-      drawFaceFilterMediaPipe(context, face, t, activeFaceFilter, false);
+      const t = transformsToUse[i] || { x:0,y:0,angle:0,scale:1,noseLocalX:0,noseLocalY:0 };
+      activeFaceFilters.forEach(filterType => {
+        drawFaceFilterMediaPipe(context, face, t, filterType, false);
+      });
     });
   }
 
@@ -1738,6 +1780,8 @@ function syncOverlaySize() {
   }
   mediaPipeLoop();
 
+  effectsManager.syncOverlayFilter();
+
   updateBootLine("boot1", "Initializing Camera...", true);
   updateBootLine("boot2", "Loading Face Tracker...", true);
   updateBootLine("boot3", "Loading Filters...", true);
@@ -1814,7 +1858,37 @@ if (snap) {
 // Face filter buttons
 document.querySelectorAll(".face-filter-btn").forEach(btn => {
   btn.addEventListener("click", () => {
-    activeFaceFilter = btn.dataset.filter === "none" ? null : btn.dataset.filter;
+    const selected = btn.dataset.filter;
+
+    if (selected === "none") {
+      // Clear all
+      activeFaceFilters = [];
+    } else {
+      const slots = filterSlots[selected] || [];
+      // Remove any active filter that shares a slot with the new one
+      activeFaceFilters = activeFaceFilters.filter(existing => {
+        const existingSlots = filterSlots[existing] || [];
+        return !slots.some(slot => existingSlots.includes(slot));
+      });
+      // Toggle the clicked filter
+      const index = activeFaceFilters.indexOf(selected);
+      if (index > -1) {
+        activeFaceFilters.splice(index, 1);   // already active → remove
+      } else {
+        activeFaceFilters.push(selected);     // add it
+      }
+    }
+
+    // Update button active states
+    document.querySelectorAll(".face-filter-btn").forEach(b => {
+      b.classList.remove("active");
+    });
+    activeFaceFilters.forEach(f => {
+      const button = document.querySelector(`.face-filter-btn[data-filter="${f}"]`);
+      if (button) button.classList.add("active");
+    });
+
+    overlayDirty = true
   });
 });
 
@@ -1824,6 +1898,8 @@ document.querySelectorAll(".animated-filter-btn").forEach(btn => {
     activeAnimatedFilter = btn.dataset.anim === "none" ? null : btn.dataset.anim;
     resetAnimatedFilterState();
   });
+
+  overlayDirty = true
 });
 
 // Face warp buttons
