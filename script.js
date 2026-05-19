@@ -1,8 +1,6 @@
 // ==============================
 // COMPATIBILITY CHECK
 // ==============================
-
-// --- Add at the very beginning of script.js (before any other code) ---
 (function checkCompatibility() {
   const missing = [];
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
@@ -15,7 +13,6 @@
     missing.push("Web Workers (needed for strip)");
 
   if (missing.length > 0) {
-    // Replace the entire page with a compatibility message
     document.body.innerHTML = `
       <div style="max-width:600px; margin:100px auto; text-align:center; font-family:sans-serif;">
         <h2>⚠️ Browser Not Supported</h2>
@@ -24,284 +21,89 @@
           ${missing.map(f => `<li>${f}</li>`).join("")}
         </ul>
         <p>Please use a modern browser like Chrome, Edge, or Firefox.</p>
-      </div>
-    `;
-    // Stop further script execution
+      </div>`;
     throw new Error("Incompatible browser – stopped loading.");
   }
 })();
 
-// =======================
-// VARIABLES
-// =======================
+// ==============================
+// DOM ELEMENTS
+// ==============================
+const cameraFeed  = document.getElementById('cameraFeed');
+const mirrorer    = document.getElementById('mirrorer');
+const snap        = document.getElementById('snap');
+const effects     = document.getElementById('effects');
+const canvas      = document.getElementById('preview');
+const photo       = document.getElementById('photo');
+const countdown   = document.getElementById('countdown');
+const glCanvas    = document.getElementById("glCanvas");
+const themeBtn = document.getElementById("themeBtn");
+const crtBtn = document.getElementById("toggleCRT");
+const contrastBtn = document.getElementById("contrastBtn");
+const recordVideoBtn = document.getElementById("recordVideoBtn");
+const recordGifBtn = document.getElementById("recordGifBtn");
+const recordBoomerangBtn = document.getElementById("recordBoomerangBtn");
 
-const cameraFeed = document.getElementById('cameraFeed');
-const mirrorer = document.getElementById('mirrorer');
-const snap = document.getElementById('snap');
-const effects = document.getElementById('effects');
-const canvas = document.getElementById('preview');
-const photo = document.getElementById('photo');
-const countdown = document.getElementById('countdown');
+// ==============================
+// GLOBAL STATE
+// ==============================
+let currentFacingMode   = "user";
+let currentStream       = null;
+let mirrored            = false;
 
-let photoList = JSON.parse(localStorage.getItem("savedCanvasImage")) || {};
-
-let currentFacingMode = "user"; // "user" = front, "environment" = back
-let currentStream = null;
-
-let mirrored = false;
-let activeFaceFilter = null;
-let faceModelsLoaded = false;
-
-let uCropOrigin, uCropScale;
-
-let trackedFaces = [];
-const SMOOTHING = 0.55; // higher = smoother, lower = more responsive
-
-let lastDetectionTime = 0;
-const DETECTION_INTERVAL = 100; // ms (10 detections/sec)
-let detectionInProgress = false;
-
-let originalCapturedPhoto = null;
-
-let dogTransforms = [];
-
+// Face filters
+let activeFaceFilter    = null;
 let activeAnimatedFilter = null;
-let animationFrameCount = 0;
+let activeARFilter      = null;   // reserved for future AR-only filters
+let faceModelsLoaded    = false;
 
+// MediaPipe
+let faceMesh            = null;
+let mediaPipeReady      = false;
+let currentFaceData     = null;
+let lastValidFaceData   = null;
+let lastFaceTime        = 0;
+let lastMediaPipeSend   = 0;
+const MEDIAPIPE_INTERVAL = 60;
+const FACE_HOLD_DURATION = 500;
+
+// Transforms & smoothing
+let dogTransforms       = [];
+const FILTER_SMOOTHING  = 0.65;
+const ANGLE_SMOOTHING   = 0.9;
+
+// Snapshots for photo capture
+let snapshotFaces       = null;
+let snapshotTransforms  = [];
+
+// Animated particles
+let animationFrameCount = 0;
 const animatedParticles = [];
 
-let distortionMode = 0;       // 0=none, 1=bulge, 2=swirl, 3=pinch
-let distortionStrength = 0.0; // controllable range e.g. 0–1
-let faceWarpEnabled = false;
+// Distortion & warp
+let distortionMode      = 0;
+let distortionStrength  = 0.0;
+let faceWarpEnabled     = false;
+let faceWarpMode        = 0;
 
-let faceWarpMode = 0;   // 0 = off (but faceWarpEnabled is the master switch), 1-6 as defined
+// Original photo & editor
+let originalCapturedPhoto = null;
 
-const FILTER_SMOOTHING = 0.75;
+// Video, GIF, and Boomerang recording variables
+let mediaRecorder = null;
+let recordedChunks = [];
+let isRecording = false;
 
-// ==========================
-// CAMERA PERMISSION ERRORS
-// ==========================
+// GIF worker
+let gifWorkerBlobURL    = null;
 
-const cameraErrorOverlay = document.createElement("div");
-cameraErrorOverlay.id = "cameraErrorOverlay";
-cameraErrorOverlay.style.cssText = `
-  position: fixed; inset: 0; background: rgba(0,0,0,0.9);
-  display: none; align-items: center; justify-content: center;
-  z-index: 100000; color: white; font-family: 'Dos', monospace;
-  flex-direction: column; text-align: center;
-`;
-cameraErrorOverlay.innerHTML = `
-  <div style="background:#000080; padding:30px; border:outset 4px #c0c0c0; max-width:500px;">
-    <h2 style="margin-top:0;">Camera Access Required</h2>
-    <p id="cameraErrorMsg">Unable to access the camera.</p>
-    <p style="font-size:14px;">Check your browser settings and make sure a camera is connected.</p>
-    <button id="retryCameraBtn" style="margin-top:15px; font-size:18px;">🔄 Retry</button>
-  </div>
-`;
-document.body.appendChild(cameraErrorOverlay);
-document.getElementById("retryCameraBtn").addEventListener("click", () => {
-  cameraErrorOverlay.style.display = "none";
-  startCamera(currentFacingMode);
-});
+// Themes of website
+const themes = ["win95", "amber", "matrix", "vaporwave"];
+let currentTheme = 0;
 
-// --- Modify startCamera() to use the overlay ---
-async function startCamera(facingMode = currentFacingMode) {
-  try {
-    if (currentStream) {
-      currentStream.getTracks().forEach(track => track.stop());
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: facingMode },
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      }
-    });
-
-    currentStream = stream;
-    currentFacingMode = facingMode;
-
-    cameraFeed.srcObject = stream;
-    await cameraFeed.play();
-
-    if (!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
-      switchCameraBtn.style.display = "none";
-    }
-
-    mirrored = currentFacingMode === "user";
-    syncOverlayMirror();
-    syncOverlaySize();
-
-    // Hide error overlay if it was shown
-    cameraErrorOverlay.style.display = "none";
-
-  } catch (error) {
-    console.error("Camera error:", error);
-    // Show the error overlay and hide loading screen (if still visible)
-    cameraErrorOverlay.style.display = "flex";
-    document.getElementById("cameraErrorMsg").textContent = error.message || "Cannot access camera.";
-    hideLoadingScreen(); // ensure boot screen disappears
-    // Still allow WebGL to render a black canvas so layout doesn't break
-    renderWebGL();
-  }
-}
-
-// =========================
-// INDEXED DB
-// =========================
-const DB_NAME = "PhotoBruhDB";
-const DB_VERSION = 1;
-const STORE_NAME = "photos";
-
-let dbPromise = null;
-
-function initDB() {
-  if (dbPromise) return dbPromise;
-
-  dbPromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = () => {
-      const db = request.result;
-
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, {
-          keyPath: "id",
-          autoIncrement: true
-        });
-
-        store.createIndex("createdAt", "createdAt", { unique: false });
-      }
-    };
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-
-  return dbPromise;
-}
-
-async function addPhotoToDB(blob, type = "photo") {
-  const db = await initDB();
-
-  // Generate thumbnail
-  let thumbnailBlob = null;
-  try {
-    const img = await createImageBitmap(blob);
-    const thumbCanvas = document.createElement("canvas");
-    const maxSize = 200; // max width/height
-    let w = img.width, h = img.height;
-    if (w > h) {
-      if (w > maxSize) { h = h * (maxSize / w); w = maxSize; }
-    } else {
-      if (h > maxSize) { w = w * (maxSize / h); h = maxSize; }
-    }
-    thumbCanvas.width = w;
-    thumbCanvas.height = h;
-    const tCtx = thumbCanvas.getContext("2d");
-    tCtx.drawImage(img, 0, 0, w, h);
-    thumbnailBlob = await new Promise(resolve => thumbCanvas.toBlob(resolve, "image/jpeg", 0.7));
-  } catch (e) {
-    console.warn("Thumbnail generation failed:", e);
-  }
-
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.add({
-      blob,
-      type,
-      thumbnail: thumbnailBlob,   // can be null
-      createdAt: Date.now()
-    });
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = (event) => {
-      if (request.error?.name === "QuotaExceededError") {
-        alert("Storage full! Your photo could not be saved. Please delete some old photos.");
-      }
-      reject(request.error);
-    };
-  });
-}
-
-async function getAllPhotosFromDB(filter = {}) {
-  const db = await initDB();
-  const tx = db.transaction(STORE_NAME, "readonly");
-  const store = tx.objectStore(STORE_NAME);
-  const request = store.getAll();
-
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => {
-      let results = request.result;
-      // Filter by type
-      if (filter.type) {
-        results = results.filter(item => item.type === filter.type);
-      }
-      // Sort
-      if (filter.sort === "oldest") {
-        results.sort((a, b) => a.createdAt - b.createdAt);
-      } else {
-        // default: newest first
-        results.sort((a, b) => b.createdAt - a.createdAt);
-      }
-      resolve(results);
-    };
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function deletePhotoFromDB(id) {
-  const db = await initDB();
-
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-
-    const request = store.delete(id);
-
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function countPhotosInDB() {
-  const db = await initDB();
-
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.count();
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-// =========================
-// LOCALSTORAGE TO INDEXEDDB MIGRATION (if any)
-// =========================
-
-async function migrateLocalStorageToIndexedDB() {
-  const oldPhotos = JSON.parse(localStorage.getItem("savedCanvasImage")) || {};
-  const values = Object.values(oldPhotos);
-
-  if (!values.length) return;
-
-  for (const dataURL of values) {
-    const res = await fetch(dataURL);
-    const blob = await res.blob();
-    await addPhotoToDB(blob, "photo");
-  }
-
-  localStorage.removeItem("savedCanvasImage");
-}
-
-// =========================
-// WEBGL RENDERER
-// =========================
-
-const glCanvas = document.getElementById("glCanvas");
+// ==============================
+// WEBCANVAS / OVERLAY CANVAS
+// ==============================
 const gl = glCanvas.getContext("webgl", {
   premultipliedAlpha: false,
   antialias: false,
@@ -309,50 +111,36 @@ const gl = glCanvas.getContext("webgl", {
   willReadFrequently: true
 });
 
-let glProgram;
-let videoTexture;
-let glBuffer;
+// Live overlay canvas
+const overlayCanvas = document.createElement("canvas");
+overlayCanvas.id = "filterOverlay";
+overlayCanvas.width = 1280;
+overlayCanvas.height = 720;
+overlayCanvas.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;z-index:2;pointer-events:none;background:transparent;";
+document.getElementById("cameraWrapper").appendChild(overlayCanvas);
+const overlayCtx = overlayCanvas.getContext("2d", { willReadFrequently: true });
 
+// Hidden recording canvas
+const recordCanvas = document.createElement("canvas");
+recordCanvas.width  = glCanvas.width;
+recordCanvas.height = glCanvas.height;
+const recordCtx = recordCanvas.getContext("2d", { willReadFrequently: true });
+let recordingRAF = null;
+
+// ==============================
+// WEBCANVAS UNIFORM LOCATIONS
+// ==============================
+let glProgram, videoTexture, glBuffer;
 let uGray, uBright, uContrast, uHue, uInvert, uSaturate, uSepia;
 let uResolution, uTexture, uTime, uAnimMode, uMirror;
+let uWarpEnabled, uDistortMode, uDistortStrength, uFaceWarpEnabled;
+let uLeftEye, uRightEye, uMouthCenter, uNoseTip;
+let uFaceWarpMode, uFaceWarpRadius, uMouthLeft, uMouthRight;
+let uCropOrigin, uCropScale;
 
-// =========================
-// SHADER SETUP
-// =========================
-
-function createShader(gl, type, source) {
-  const shader = gl.createShader(type);
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    console.error(gl.getShaderInfoLog(shader));
-    gl.deleteShader(shader);
-    return null;
-  }
-
-  return shader;
-}
-
-function createProgram(gl, vsSource, fsSource) {
-  const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
-  const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
-
-  const program = gl.createProgram();
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.linkProgram(program);
-
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    console.error(gl.getProgramInfoLog(program));
-    return null;
-  }
-
-  return program;
-}
-
-// Shaders
-
+// ==============================
+// SHADERS
+// ==============================
 const vertexShaderSource = `
   attribute vec2 aPosition;
   attribute vec2 aTexCoord;
@@ -384,6 +172,8 @@ const fragmentShaderSource = `
   uniform float uTime;
   uniform int uAnimMode;
   uniform float uMirror;
+
+  uniform int uWarpEnabled;
 
   uniform int uDistortMode;
   uniform float uDistortStrength;
@@ -655,7 +445,12 @@ const fragmentShaderSource = `
       }
 
       // --- Warp texture coordinate (NEW) ---
-      vec2 warpedUV = warpCoord(uv);
+      vec2 warpedUV;
+      if (uWarpEnabled == 1) {
+          warpedUV = warpCoord(uv);
+      } else {
+          warpedUV = uv;
+      }
 
       // Add a soft clamp to avoid sampling beyond the texture border
       warpedUV = clamp(warpedUV, vec2(0.001), vec2(0.999));
@@ -694,79 +489,39 @@ const fragmentShaderSource = `
   }
   `;
 
-// =========================
-// WEBGL INITIALIZATION
-// =========================
+// ==============================
+// WEBCANVAS HELPERS
+// ==============================
+function createShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
 
-function initWebGL() {
-  glProgram = createProgram(gl, vertexShaderSource, fragmentShaderSource);
-  gl.useProgram(glProgram);
-  console.log(gl.getProgramInfoLog(glProgram));
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(shader));
+    gl.deleteShader(shader);
+    return null;
+  }
 
-  const vertices = new Float32Array([
-    -1, -1,  0, 1,
-     1, -1,  1, 1,
-    -1,  1,  0, 0,
-     1,  1,  1, 0
-  ]);
-
-  glBuffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, glBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-
-  const aPosition = gl.getAttribLocation(glProgram, "aPosition");
-  const aTexCoord = gl.getAttribLocation(glProgram, "aTexCoord");
-
-  gl.enableVertexAttribArray(aPosition);
-  gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 16, 0);
-
-  gl.enableVertexAttribArray(aTexCoord);
-  gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, false, 16, 8);
-
-  videoTexture = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, videoTexture);
-
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-  uTexture = gl.getUniformLocation(glProgram, "uTexture");
-  uResolution = gl.getUniformLocation(glProgram, "uResolution");
-
-  uGray = gl.getUniformLocation(glProgram, "uGray");
-  uBright = gl.getUniformLocation(glProgram, "uBright");
-  uContrast = gl.getUniformLocation(glProgram, "uContrast");
-  uHue = gl.getUniformLocation(glProgram, "uHue");
-  uInvert = gl.getUniformLocation(glProgram, "uInvert");
-  uSaturate = gl.getUniformLocation(glProgram, "uSaturate");
-  uSepia = gl.getUniformLocation(glProgram, "uSepia");
-
-  uTime = gl.getUniformLocation(glProgram, "uTime");
-  uAnimMode = gl.getUniformLocation(glProgram, "uAnimMode");
-  uMirror = gl.getUniformLocation(glProgram, "uMirror");
-
-  // Distortion / warp uniforms
-  uDistortMode   = gl.getUniformLocation(glProgram, "uDistortMode");
-  uDistortStrength = gl.getUniformLocation(glProgram, "uDistortStrength");
-
-  // Face warp feature points (normalised 0–1 coords)
-  uLeftEye       = gl.getUniformLocation(glProgram, "uLeftEye");
-  uRightEye      = gl.getUniformLocation(glProgram, "uRightEye");
-  uMouthCenter   = gl.getUniformLocation(glProgram, "uMouthCenter");
-  uNoseTip       = gl.getUniformLocation(glProgram, "uNoseTip");
-  uFaceWarpMode   = gl.getUniformLocation(glProgram, "uFaceWarpMode");
-  uFaceWarpRadius = gl.getUniformLocation(glProgram, "uFaceWarpRadius");
-  uMouthLeft      = gl.getUniformLocation(glProgram, "uMouthLeft");
-  uMouthRight     = gl.getUniformLocation(glProgram, "uMouthRight");
-  uFaceWarpEnabled = gl.getUniformLocation(glProgram, "uFaceWarpEnabled");
-
-  // Crop uniforms (maintain video aspect ratio)
-  uCropOrigin = gl.getUniformLocation(glProgram, "uCropOrigin");
-  uCropScale  = gl.getUniformLocation(glProgram, "uCropScale");
+  return shader;
 }
 
-// Filter Helper
+function createProgram(gl, vsSource, fsSource) {
+  const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+  const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+  const program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(program));
+    return null;
+  }
+
+  return program;
+}
 
 function getAnimatedFilterMode() {
   switch (activeAnimatedFilter) {
@@ -775,584 +530,9 @@ function getAnimatedFilterMode() {
   }
 }
 
-// =========================
-// LIVE WEBGL RENDER LOOP
-// =========================
-
-function renderWebGL() {
-  if (cameraFeed.readyState >= 2) {
-    gl.viewport(0, 0, glCanvas.width, glCanvas.height);
-
-    gl.bindTexture(gl.TEXTURE_2D, videoTexture);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      cameraFeed
-    );
-
-    const fx = effectsManager.effects;
-
-    gl.uniform1i(uTexture, 0);
-    gl.uniform2f(uResolution, glCanvas.width, glCanvas.height);
-
-    gl.uniform1f(uGray, fx.grayscale / 100);
-    gl.uniform1f(uBright, fx.brightness / 100);
-    gl.uniform1f(uContrast, fx.contrast / 100);
-    gl.uniform1f(uHue, (fx.hue / 200.0) * 6.28318);
-    gl.uniform1f(uInvert, fx.invert / 100);
-    gl.uniform1f(uSaturate, fx.saturate / 100);
-    gl.uniform1f(uSepia, fx.sepia / 100);
-
-    gl.uniform1f(uTime, performance.now() * 0.001);
-    gl.uniform1i(uAnimMode, getAnimatedFilterMode());
-    gl.uniform1f(uMirror, mirrored ? 1.0 : 0.0);
-
-    // --- Distortion uniforms ---
-    gl.uniform1i(uDistortMode, distortionMode);
-    gl.uniform1f(uDistortStrength, distortionStrength);
-    gl.uniform1f(uFaceWarpEnabled, faceWarpEnabled ? 1.0 : 0.0);
-
-    // --- Face warp feature points (normalised 0–1) ---
-    gl.uniform1i(uFaceWarpMode, faceWarpMode);
-
-    if (faceWarpEnabled && trackedFaces.length > 0) {
-        const face = trackedFaces[0];  // use first face
-        const lm = face.landmarks;
-
-        const norm = (p) => ({
-            x: p.x / cameraFeed.videoWidth,
-            y: p.y / cameraFeed.videoHeight
-        });
-
-        const leftEye   = norm(getAveragePoint(lm.getLeftEye()));
-        const rightEye  = norm(getAveragePoint(lm.getRightEye()));
-        const mouth     = norm(getAveragePoint(lm.positions.slice(48, 68))); // outer mouth
-        const noseTip   = norm(lm.positions[30]);
-        const mouthLeft = norm(lm.positions[48]);   // left corner
-        const mouthRight= norm(lm.positions[54]);   // right corner
-
-        // Face center and radius (for fisheye mode)
-        const faceCenterX = (leftEye.x + rightEye.x) / 2;
-        const faceCenterY = (leftEye.y + rightEye.y) / 2;
-        const faceCenter = { x: faceCenterX, y: faceCenterY };
-        const dx = mouth.x - faceCenter.x;
-        const dy = mouth.y - faceCenter.y;
-        const faceRadius = Math.sqrt(dx*dx + dy*dy) * 1.3;  // a bit bigger than eye-mouth distance
-
-        gl.uniform2f(uLeftEye,     leftEye.x,   leftEye.y);
-        gl.uniform2f(uRightEye,    rightEye.x,  rightEye.y);
-        gl.uniform2f(uMouthCenter, mouth.x,     mouth.y);
-        gl.uniform2f(uNoseTip,     noseTip.x,   noseTip.y);
-        gl.uniform2f(uMouthLeft,   mouthLeft.x, mouthLeft.y);
-        gl.uniform2f(uMouthRight,  mouthRight.x,mouthRight.y);
-        gl.uniform1f(uFaceWarpRadius, faceRadius);
-    } else {
-        // Safe defaults
-        gl.uniform2f(uLeftEye,     -1.0, -1.0);
-        gl.uniform2f(uRightEye,    -1.0, -1.0);
-        gl.uniform2f(uMouthCenter, -1.0, -1.0);
-        gl.uniform2f(uNoseTip,     -1.0, -1.0);
-        gl.uniform2f(uMouthLeft,   -1.0, -1.0);
-        gl.uniform2f(uMouthRight,  -1.0, -1.0);
-        gl.uniform1f(uFaceWarpRadius, 0.3);
-    }
-
-    // Maintain aspect ratio – crop the video to fill the canvas
-    const videoW = cameraFeed.videoWidth  || 1280;
-    const videoH = cameraFeed.videoHeight || 720;
-    const canvasW = glCanvas.width;   // 1280
-    const canvasH = glCanvas.height;  // 720
-
-    const videoAspect = videoW / videoH;
-    const canvasAspect = canvasW / canvasH;
-
-    let cropX = 0, cropY = 0, cropW = 1, cropH = 1;
-
-    if (videoAspect > canvasAspect) {
-      // video wider → crop left/right
-      cropW = canvasAspect / videoAspect;
-      cropX = (1 - cropW) / 2;
-    } else {
-      // video taller → crop top/bottom
-      cropH = videoAspect / canvasAspect;
-      cropY = (1 - cropH) / 2;
-    }
-
-    gl.uniform2f(uCropOrigin, cropX, cropY);
-    gl.uniform2f(uCropScale,  cropW, cropH);
-
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-  }
-
-  requestAnimationFrame(renderWebGL);
-}
-
-// ==============
-// LOADING SCREEN
-// ==============
-const loadingScreen = document.getElementById("loadingScreen");
-
-function updateBootLine(id, text, done = false) {
-  const line = document.getElementById(id);
-  if (!line) return;
-
-  line.textContent = `${done ? "[✓]" : "[ ]"} ${text}`;
-}
-
-function hideLoadingScreen() {
-  loadingScreen.classList.add("hidden");
-
-  setTimeout(() => {
-    loadingScreen.style.display = "none";
-  }, 600);
-}
-
-// =========================
-// LIVE FILTER OVERLAY CANVAS
-// =========================
-const overlayCanvas = document.createElement("canvas");
-const offCtx = overlayCanvas.getContext("2d", {
-  willReadFrequently: true
-});
-overlayCanvas.id = "filterOverlay";
-overlayCanvas.width = 1280;
-overlayCanvas.height = 720;
-
-overlayCanvas.style.position = "absolute";
-overlayCanvas.style.top = "0";
-overlayCanvas.style.left = "0";
-overlayCanvas.style.width = "100%";
-overlayCanvas.style.height = "100%";
-overlayCanvas.style.zIndex = "2";
-overlayCanvas.style.pointerEvents = "none";
-overlayCanvas.style.background = "transparent";
-
-document.getElementById("cameraWrapper").appendChild(overlayCanvas);
-
-const overlayCtx = overlayCanvas.getContext("2d", {
-  willReadFrequently: true
-});
-
-// =========================
-// FILTER ASSETS
-// =========================
-const faceFilterAssets = {
-  dog: {
-    ears: new Image(),
-    nose: new Image()
-  },
-  cat: {
-    ears: new Image(),
-    nose: new Image()
-  },
-  mustache: {
-    nose: new Image()
-  },
-  rabbid: {
-    ears: new Image(),
-    nose: new Image()
-  },
-  lorax: {
-    nose: new Image()
-  },
-  minion: {
-    ears: new Image()
-  },
-  woah: {
-    nose: new Image()
-  },
-  shrek: {
-    ears: new Image()
-  }
-};
-
-faceFilterAssets.dog.ears.src = "public/assets/filters/dogEars.png";
-faceFilterAssets.dog.nose.src = "public/assets/filters/dogNose.png";
-
-faceFilterAssets.cat.ears.src = "public/assets/filters/catEars.png";
-faceFilterAssets.cat.nose.src = "public/assets/filters/catNose.png";
-
-faceFilterAssets.mustache.nose.src = "public/assets/filters/mustache.png";
-
-faceFilterAssets.rabbid.ears.src = "public/assets/filters/rabbidEars.png";
-faceFilterAssets.rabbid.nose.src = "public/assets/filters/rabbidMouth.png";
-
-faceFilterAssets.lorax.nose.src = "public/assets/filters/lorax.png";
-
-faceFilterAssets.minion.ears.src = "public/assets/filters/minionGlasses.png"
-
-faceFilterAssets.woah.nose.src = "public/assets/filters/woahShocked.png"
-
-faceFilterAssets.shrek.ears.src = "public/assets/filters/shrekEars.png"
-
-// =========================
-// CAMERA AND LOADING STARTUP
-// =========================
-async function startCamera(facingMode = currentFacingMode) {
-  try {
-    // stop previous stream
-    if (currentStream) {
-      currentStream.getTracks().forEach(track => track.stop());
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: facingMode },
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      }
-    });
-
-    currentStream = stream;
-    currentFacingMode = facingMode;
-
-    cameraFeed.srcObject = stream;
-    await cameraFeed.play();
-
-    if (!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
-      switchCameraBtn.style.display = "none";
-    }
-
-    mirrored = currentFacingMode === "user";
-
-    syncOverlayMirror();
-
-    syncOverlaySize();
-  } catch (error) {
-    console.error("Error accessing camera:", error);
-  }
-}
-
-(async () => {
-  initWebGL();
-  await startCamera("user");
-  await loadFaceModels();
-  updateBootLine("boot1", "Initializing Camera...", true);
-
-  renderWebGL();
-  renderOverlayLoop();
-})();
-
-// =========================
-// FACE API MODEL LOADING
-// =========================
-
-async function loadFaceModels() {
-  const MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
-  const FACE_LOAD_TIMEOUT = 10000; // 10 seconds
-
-  try {
-    // Race the model loading against a timeout
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Face model loading timed out")), FACE_LOAD_TIMEOUT)
-    );
-
-    await Promise.race([
-      Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-        faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL)
-      ]),
-      timeoutPromise
-    ]);
-
-    faceModelsLoaded = true;
-    updateBootLine("boot2", "Loading Face Tracker...", true);
-    updateBootLine("boot3", "Loading Filters...", true);
-
-    setTimeout(() => {
-      updateBootLine("boot4", "Starting PhotoBruh...", true);
-      setTimeout(hideLoadingScreen, 500);
-    }, 300);
-
-    detectFaceLoop();
-
-  } catch (err) {
-    console.error("Face models failed:", err);
-    // Still mark loading as done so boot screen hides
-    updateBootLine("boot2", "Face Tracker failed – disabled", true);
-    updateBootLine("boot3", "Filters unavailable", true);
-    faceModelsLoaded = false;
-
-    // Disable face‑filter UI
-    document.querySelectorAll(".face-filter-btn, .animated-filter-btn, .face-warp-btn")
-      .forEach(btn => btn.disabled = true);
-    const warpToggle = document.getElementById("faceWarpToggleBtn");
-    if (warpToggle) warpToggle.disabled = true;
-
-    // Show a small warning in the effects panel (if it exists)
-    const effectsList = document.getElementById("effectsList");
-    if (effectsList) {
-      const warn = document.createElement("p");
-      warn.style.color = "red";
-      warn.textContent = "⚠ Face filters unavailable (model load failed).";
-      effectsList.prepend(warn);
-    }
-
-    setTimeout(() => {
-      updateBootLine("boot4", "Starting PhotoBruh (no face filters)...", true);
-      setTimeout(hideLoadingScreen, 500);
-    }, 300);
-
-    // Still start the camera loop without face detection
-    renderWebGL();
-    renderOverlayLoop(); // overlay loop will still run (for animated effects only)
-  }
-}
-
-async function detectFaceLoop() {
-  if (!faceModelsLoaded) return;
-
-  const now = performance.now();
-
-  // skip if detection is already running
-  if (detectionInProgress) {
-    requestAnimationFrame(detectFaceLoop);
-    return;
-  }
-
-  // skip until enough time has passed
-  if (now - lastDetectionTime < DETECTION_INTERVAL) {
-    requestAnimationFrame(detectFaceLoop);
-    return;
-  }
-
-  if (cameraFeed.readyState >= 2) {
-    detectionInProgress = true;
-    lastDetectionTime = now;
-
-    try {
-      const detections = await faceapi
-        .detectAllFaces(
-          cameraFeed,
-          new faceapi.TinyFaceDetectorOptions({
-            inputSize: 224,
-            scoreThreshold: 0.5
-          })
-        )
-        .withFaceLandmarks(true);
-
-      trackedFaces = detections.map((face, i) => {
-        if (!dogTransforms[i]) {
-          dogTransforms[i] = {
-            x: 0,
-            y: 0,
-            angle: 0,
-            scale: 1,
-            noseOffsetX: 0,
-            noseOffsetY: 0
-          };
-        }
-
-        return face;
-      });
-
-      dogTransforms.length = trackedFaces.length;
-    } catch (err) {
-      console.error("Face detection error:", err);
-    }
-
-    detectionInProgress = false;
-  }
-
-  requestAnimationFrame(detectFaceLoop);
-}
-
-function smoothFace(oldFace, newFace) {
-  const oldPts = oldFace.landmarks.positions;
-  const newPts = newFace.landmarks.positions;
-
-  const blended = newPts.map((pt, i) => {
-    const old = oldPts[i] || pt;
-
-    return {
-      x: old.x * SMOOTHING + pt.x * (1 - SMOOTHING),
-      y: old.y * SMOOTHING + pt.y * (1 - SMOOTHING)
-    };
-  });
-
-  return {
-    ...newFace,
-    landmarks: {
-      ...newFace.landmarks,
-      positions: blended,
-      getLeftEye: () => blended.slice(36, 42),
-      getRightEye: () => blended.slice(42, 48),
-      getNose: () => blended.slice(27, 36)
-    }
-  };
-}
-
-function getAveragePoint(points) {
-  let x = 0;
-  let y = 0;
-
-  for (const p of points) {
-    x += p.x;
-    y += p.y;
-  }
-
-  return {
-    x: x / points.length,
-    y: y / points.length
-  };
-}
-
-function lerp(a, b, t) {
-  return a * (1 - t) + b * t;
-}
-
-// =========================
-// LIVE OVERLAY RENDER LOOP
-// =========================
-function renderOverlayLoop() {
-  overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-
-  // Face filters
-  if (activeFaceFilter && trackedFaces.length) {
-    overlayCtx.save();
-
-    trackedFaces.forEach((face, i) => {
-      drawFaceFilter(
-        overlayCtx,
-        face,
-        cameraFeed,
-        dogTransforms[i],
-        activeFaceFilter,
-        true
-      );
-    });
-
-    overlayCtx.restore();
-  }
-
-  // Animated overlays (always independent)
-  if (activeAnimatedFilter) {
-    overlayCtx.save();
-    drawAnimatedFilter(overlayCtx);
-    overlayCtx.restore();
-  }
-
-  animationFrameCount++;
-  requestAnimationFrame(renderOverlayLoop);
-}
-
-function drawAnimatedFilter(ctx) {
-  switch (activeAnimatedFilter) {
-    case "scanlines":
-      drawScanlines(ctx);
-      break;
-    case "sparkles":
-      drawSparkles(ctx);
-      break;
-    case "snow":
-      drawSnow(ctx);
-      break;
-    case "hearts":
-      drawHearts(ctx);
-      break;
-    case "matrix":
-      drawMatrix(ctx);
-      break;
-  }
-}
-
-// =========================
-// MIRROR CAMERA
-// =========================
-mirrorer.addEventListener('click', () => {
-  soundManager.play("click");
-  mirrored = !mirrored;
-  syncOverlayMirror();
-});
-
-// =========================
-// SWITCH CAMERA
-// =========================
-const switchCameraBtn = document.getElementById("switchCameraBtn");
-
-switchCameraBtn.addEventListener("click", async () => {
-  soundManager.play("click");
-  const nextMode = currentFacingMode === "user" ? "environment" : "user";
-
-  await startCamera(nextMode);
-});
-
-
-// =========================
-// SNAP COUNTDOWN
-// =========================
-if (snap) {
-  snap.addEventListener('click', () => {
-    soundManager.play("click");
-    soundManager.play("tick");
-    isBooth = false;
-    let timeLeft = 3;
-
-    countdown.style.display = "flex";
-    countdown.textContent = timeLeft;
-
-    snap.disabled = true;
-
-    const timer = setInterval(() => {
-      timeLeft--;
-
-      if (timeLeft > 0) {
-        countdown.textContent = timeLeft;
-      } else {
-        clearInterval(timer);
-        countdown.style.display = "none";
-        takePhoto();
-        snap.disabled = false;
-      }
-    }, 1000);
-  });
-}
-
-
-// =========================
-// FILTER TOGGLE
-// =========================
-document.querySelectorAll(".face-filter-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const selected = btn.dataset.filter;
-    activeFaceFilter = selected === "none" ? null : selected;
-    console.log("Active filter:", activeFaceFilter);
-  });
-});
-
-document.querySelectorAll(".animated-filter-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const selected = btn.dataset.anim;
-    activeAnimatedFilter = selected === "none" ? null : selected;
-
-    resetAnimatedFilterState();
-    console.log("Animated filter:", activeAnimatedFilter);
-  });
-});
-
-// Face Warp preset buttons
-document.querySelectorAll(".face-warp-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    faceWarpMode = parseInt(btn.dataset.mode);
-    faceWarpEnabled = true;
-    document.getElementById("faceWarpToggleBtn").textContent = "Face Warp: On";
-  });
-});
-
-// Face Warp master toggle
-document.getElementById("faceWarpToggleBtn").addEventListener("click", () => {
-  faceWarpEnabled = !faceWarpEnabled;
-  const btn = document.getElementById("faceWarpToggleBtn");
-  btn.textContent = "Face Warp: " + (faceWarpEnabled ? "On" : "Off");
-  if (!faceWarpEnabled) faceWarpMode = 0;
-});
-
-// =========================
-// EFFECTS MANAGEMENT
-// =========================
+// ==============================
+// EFFECTS MANAGER
+// ==============================
 class EffectsManager {
   constructor() {
     this.effects = {
@@ -1459,286 +639,505 @@ class EffectsManager {
 
 const effectsManager = new EffectsManager();
 
-// =========================
-// RESET ANIMATED STATE
-// =========================
+// ==============================
+// WEBCANVAS INIT
+// ==============================
 
-function resetAnimatedFilterState() {
-  animatedParticles.length = 0;
+function initWebGL() {
+  glProgram = createProgram(gl, vertexShaderSource, fragmentShaderSource);
+  gl.useProgram(glProgram);
+  console.log(gl.getProgramInfoLog(glProgram));
 
-  if (activeAnimatedFilter === "sparkles") {
-    for (let i = 0; i < 40; i++) {
-      animatedParticles.push({
-        x: Math.random() * overlayCanvas.width,
-        y: Math.random() * overlayCanvas.height,
-        size: Math.random() * 4 + 1,
-        speed: Math.random() * 0.8 + 0.2,
-        alpha: Math.random()
-      });
+  const vertices = new Float32Array([
+    -1, -1,  0, 1,
+     1, -1,  1, 1,
+    -1,  1,  0, 0,
+     1,  1,  1, 0
+  ]);
+
+  glBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, glBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+  const aPosition = gl.getAttribLocation(glProgram, "aPosition");
+  const aTexCoord = gl.getAttribLocation(glProgram, "aTexCoord");
+
+  gl.enableVertexAttribArray(aPosition);
+  gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 16, 0);
+
+  gl.enableVertexAttribArray(aTexCoord);
+  gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, false, 16, 8);
+
+  videoTexture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+  uTexture = gl.getUniformLocation(glProgram, "uTexture");
+  uResolution = gl.getUniformLocation(glProgram, "uResolution");
+
+  uGray = gl.getUniformLocation(glProgram, "uGray");
+  uBright = gl.getUniformLocation(glProgram, "uBright");
+  uContrast = gl.getUniformLocation(glProgram, "uContrast");
+  uHue = gl.getUniformLocation(glProgram, "uHue");
+  uInvert = gl.getUniformLocation(glProgram, "uInvert");
+  uSaturate = gl.getUniformLocation(glProgram, "uSaturate");
+  uSepia = gl.getUniformLocation(glProgram, "uSepia");
+
+  uTime = gl.getUniformLocation(glProgram, "uTime");
+  uAnimMode = gl.getUniformLocation(glProgram, "uAnimMode");
+  uMirror = gl.getUniformLocation(glProgram, "uMirror");
+
+  // Distortion / warp uniforms
+  uDistortMode   = gl.getUniformLocation(glProgram, "uDistortMode");
+  uDistortStrength = gl.getUniformLocation(glProgram, "uDistortStrength");
+  uWarpEnabled = gl.getUniformLocation(glProgram, "uWarpEnabled");
+
+  // Face warp feature points (normalised 0–1 coords)
+  uLeftEye       = gl.getUniformLocation(glProgram, "uLeftEye");
+  uRightEye      = gl.getUniformLocation(glProgram, "uRightEye");
+  uMouthCenter   = gl.getUniformLocation(glProgram, "uMouthCenter");
+  uNoseTip       = gl.getUniformLocation(glProgram, "uNoseTip");
+  uFaceWarpMode   = gl.getUniformLocation(glProgram, "uFaceWarpMode");
+  uFaceWarpRadius = gl.getUniformLocation(glProgram, "uFaceWarpRadius");
+  uMouthLeft      = gl.getUniformLocation(glProgram, "uMouthLeft");
+  uMouthRight     = gl.getUniformLocation(glProgram, "uMouthRight");
+  uFaceWarpEnabled = gl.getUniformLocation(glProgram, "uFaceWarpEnabled");
+
+  // Crop uniforms (maintain video aspect ratio)
+  uCropOrigin = gl.getUniformLocation(glProgram, "uCropOrigin");
+  uCropScale  = gl.getUniformLocation(glProgram, "uCropScale");
+}
+
+// ==============================
+// WEBCANVAS RENDER LOOP
+// ==============================
+function renderWebGL() {
+  if (cameraFeed.readyState >= 2) {
+    gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+    gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cameraFeed);
+
+    const fx = effectsManager.effects;
+    gl.uniform1i(uTexture, 0);
+    gl.uniform2f(uResolution, glCanvas.width, glCanvas.height);
+    gl.uniform1f(uGray, fx.grayscale / 100);
+    gl.uniform1f(uBright, fx.brightness / 100);
+    gl.uniform1f(uContrast, fx.contrast / 100);
+    gl.uniform1f(uHue, (fx.hue / 200.0) * 6.28318);
+    gl.uniform1f(uInvert, fx.invert / 100);
+    gl.uniform1f(uSaturate, fx.saturate / 100);
+    gl.uniform1f(uSepia, fx.sepia / 100);
+    gl.uniform1f(uTime, performance.now() * 0.001);
+    gl.uniform1i(uAnimMode, getAnimatedFilterMode());
+    gl.uniform1f(uMirror, mirrored ? 1.0 : 0.0);
+
+    gl.uniform1i(uDistortMode, distortionMode);
+    gl.uniform1f(uDistortStrength, distortionStrength);
+    gl.uniform1f(uFaceWarpEnabled, faceWarpEnabled ? 1.0 : 0.0);
+    gl.uniform1i(uWarpEnabled, (distortionMode !== 0 || faceWarpEnabled) ? 1 : 0);
+    gl.uniform1i(uFaceWarpMode, faceWarpMode);
+
+    // Face warp points from MediaPipe
+    let warpFace = null;
+    if (currentFaceData && currentFaceData.faces.length > 0) {
+      warpFace = currentFaceData.faces[0];
+    } else if (lastValidFaceData && lastValidFaceData.faces.length > 0) {
+      warpFace = lastValidFaceData.faces[0];
     }
+
+    if (faceWarpEnabled && warpFace) {
+      const lm = warpFace.landmarks;
+      const norm = (idx) => ({ x: lm[idx].x, y: lm[idx].y });
+      const leftEye = norm(33), rightEye = norm(263), noseTip = norm(1);
+      const mouthLeft = norm(61), mouthRight = norm(291);
+      const mouthCenter = { x: (mouthLeft.x + mouthRight.x) / 2, y: (mouthLeft.y + mouthRight.y) / 2 };
+      const faceCenterX = (leftEye.x + rightEye.x) / 2;
+      const faceCenterY = (leftEye.y + rightEye.y) / 2;
+      const dx = mouthCenter.x - faceCenterX, dy = mouthCenter.y - faceCenterY;
+      const faceRadius = Math.sqrt(dx*dx + dy*dy) * 1.3;
+
+      gl.uniform2f(uLeftEye, leftEye.x, leftEye.y);
+      gl.uniform2f(uRightEye, rightEye.x, rightEye.y);
+      gl.uniform2f(uMouthCenter, mouthCenter.x, mouthCenter.y);
+      gl.uniform2f(uNoseTip, noseTip.x, noseTip.y);
+      gl.uniform2f(uMouthLeft, mouthLeft.x, mouthLeft.y);
+      gl.uniform2f(uMouthRight, mouthRight.x, mouthRight.y);
+      gl.uniform1f(uFaceWarpRadius, faceRadius);
+    } else {
+      gl.uniform2f(uLeftEye, -1, -1);
+      gl.uniform2f(uRightEye, -1, -1);
+      gl.uniform2f(uMouthCenter, -1, -1);
+      gl.uniform2f(uNoseTip, -1, -1);
+      gl.uniform2f(uMouthLeft, -1, -1);
+      gl.uniform2f(uMouthRight, -1, -1);
+      gl.uniform1f(uFaceWarpRadius, 0.3);
+    }
+
+    // Crop
+    const videoW = cameraFeed.videoWidth || 1280;
+    const videoH = cameraFeed.videoHeight || 720;
+    const canvasW = glCanvas.width, canvasH = glCanvas.height;
+    const videoAspect = videoW / videoH, canvasAspect = canvasW / canvasH;
+    let cropX = 0, cropY = 0, cropW = 1, cropH = 1;
+    if (videoAspect > canvasAspect) {
+      cropW = canvasAspect / videoAspect;
+      cropX = (1 - cropW) / 2;
+    } else {
+      cropH = videoAspect / canvasAspect;
+      cropY = (1 - cropH) / 2;
+    }
+    gl.uniform2f(uCropOrigin, cropX, cropY);
+    gl.uniform2f(uCropScale, cropW, cropH);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
+  requestAnimationFrame(renderWebGL);
+}
 
-  if (activeAnimatedFilter === "snow") {
-    for (let i = 0; i < 60; i++) {
-      animatedParticles.push({
-        x: Math.random() * overlayCanvas.width,
-        y: Math.random() * overlayCanvas.height,
-        size: Math.random() * 5 + 2,
-        speed: Math.random() * 1.5 + 0.5
-      });
-    }
-  }
+// ==============================
+// LOADING SCREEN
+// ==============================
+const loadingScreen = document.getElementById("loadingScreen");
+function updateBootLine(id, text, done = false) {
+  const line = document.getElementById(id);
+  if (line) line.textContent = `${done ? "[✓]" : "[ ]"} ${text}`;
+}
+function hideLoadingScreen() {
+  loadingScreen.classList.add("hidden");
+  setTimeout(() => { loadingScreen.style.display = "none"; }, 600);
+}
 
-  if (activeAnimatedFilter === "hearts") {
-    for (let i = 0; i < 25; i++) {
-      animatedParticles.push({
-        x: Math.random() * overlayCanvas.width,
-        y: overlayCanvas.height + Math.random() * 300,
-        size: Math.random() * 18 + 12,
-        speed: Math.random() * 1.2 + 0.5,
-        drift: (Math.random() - 0.5) * 1.2
-      });
-    }
-  }
+// ==============================
+// FILTER ASSETS
+// ==============================
+const faceFilterAssets = {
+  dog:      { ears: new Image(), nose: new Image() },
+  cat:      { ears: new Image(), nose: new Image() },
+  mustache: { nose: new Image() },
+  rabbid:   { ears: new Image(), nose: new Image() },
+  lorax:    { nose: new Image() },
+  minion:   { ears: new Image() },
+  woah:     { nose: new Image() },
+  shrek:    { ears: new Image() },
+  glasses:  { ears: new Image() }   // image is loaded below
+};
 
-  if (activeAnimatedFilter === "matrix") {
-    for (let i = 0; i < 40; i++) {
-      animatedParticles.push({
-        x: i * 32,
-        y: Math.random() * -800,
-        speed: Math.random() * 4 + 3
-      });
+faceFilterAssets.dog.ears.src      = "public/assets/filters/dogEars.png";
+faceFilterAssets.dog.nose.src      = "public/assets/filters/dogNose.png";
+faceFilterAssets.cat.ears.src      = "public/assets/filters/catEars.png";
+faceFilterAssets.cat.nose.src      = "public/assets/filters/catNose.png";
+faceFilterAssets.mustache.nose.src = "public/assets/filters/mustache.png";
+faceFilterAssets.rabbid.ears.src   = "public/assets/filters/rabbidEars.png";
+faceFilterAssets.rabbid.nose.src   = "public/assets/filters/rabbidMouth.png";
+faceFilterAssets.lorax.nose.src    = "public/assets/filters/lorax.png";
+faceFilterAssets.minion.ears.src   = "public/assets/filters/minionGlasses.png";
+faceFilterAssets.woah.nose.src     = "public/assets/filters/woahShocked.png";
+faceFilterAssets.shrek.ears.src    = "public/assets/filters/shrekEars.png";
+faceFilterAssets.glasses.ears.src  = "public/assets/filters/sunglasses.png";
+
+// ==============================
+// CAMERA
+// ==============================
+const cameraErrorOverlay = document.createElement("div");
+cameraErrorOverlay.id = "cameraErrorOverlay";
+cameraErrorOverlay.style.cssText = `
+  position:fixed;inset:0;background:rgba(0,0,0,0.9);display:none;align-items:center;
+  justify-content:center;z-index:100000;color:white;font-family:'Dos',monospace;
+  flex-direction:column;text-align:center;`;
+cameraErrorOverlay.innerHTML = `
+  <div style="background:#000080;padding:30px;border:outset 4px #c0c0c0;max-width:500px;">
+    <h2 style="margin-top:0;">Camera Access Required</h2>
+    <p id="cameraErrorMsg">Unable to access the camera.</p>
+    <p style="font-size:14px;">Check your browser settings and make sure a camera is connected.</p>
+    <button id="retryCameraBtn" style="margin-top:15px;font-size:18px;">🔄 Retry</button>
+  </div>`;
+document.body.appendChild(cameraErrorOverlay);
+document.getElementById("retryCameraBtn").addEventListener("click", () => {
+  cameraErrorOverlay.style.display = "none";
+  startCamera(currentFacingMode);
+});
+
+async function startCamera(facingMode = currentFacingMode) {
+  try {
+    if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: facingMode }, width: { ideal: 640 }, height: { ideal: 360 } }
+    });
+    currentStream = stream;
+    currentFacingMode = facingMode;
+    cameraFeed.srcObject = stream;
+    await cameraFeed.play();
+    if (!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+      switchCameraBtn.style.display = "none";
     }
+    mirrored = currentFacingMode === "user";
+    syncOverlayMirror();
+    syncOverlaySize();
+    cameraErrorOverlay.style.display = "none";
+  } catch (error) {
+    console.error("Camera error:", error);
+    cameraErrorOverlay.style.display = "flex";
+    document.getElementById("cameraErrorMsg").textContent = error.message || "Cannot access camera.";
+    hideLoadingScreen();
+    renderWebGL();
   }
 }
 
-// =========================
-// EFFECTS PANEL TOGGLE
-// =========================
-if (effects) {
-  effects.addEventListener('click', () => {
-    soundManager.play("click");
-    const effectsList = document.getElementById('effectsList');
-    effectsList.style.display = effectsList.style.display === 'block' ? 'none' : 'block';
+// ==============================
+// MEDIAPIPE FACE MESH
+// ==============================
+async function initMediaPipe() {
+  faceMesh = new FaceMesh({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+  });
+  faceMesh.setOptions({
+    maxNumFaces: 2, refineLandmarks: true,
+    minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
+  });
+  faceMesh.onResults((results) => {
+    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+      const faces = results.multiFaceLandmarks.map(landmarks => ({ landmarks,
+        headPose: results.multiFaceGeometry ? results.multiFaceGeometry[results.multiFaceLandmarks.indexOf(landmarks)] : null
+      }));
+      currentFaceData = { faces };
+      lastValidFaceData = currentFaceData;
+      lastFaceTime = performance.now();
+    } else {
+      currentFaceData = null;
+    }
+  });
+  await faceMesh.initialize();
+  mediaPipeReady = true;
+}
+
+function sendFrameToMediaPipe() {
+  if (!mediaPipeReady || !faceMesh || cameraFeed.readyState < 2) return;
+  faceMesh.send({ image: cameraFeed });
+}
+
+// ==============================
+// GIF WORKER
+// ==============================
+async function loadGifWorker() {
+  if (gifWorkerBlobURL) return;
+  const workerUrl = "https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js";
+  try {
+    const response = await fetch(workerUrl);
+    const text = await response.text();
+    const blob = new Blob([text], { type: "application/javascript" });
+    gifWorkerBlobURL = URL.createObjectURL(blob);
+    document.getElementById("recordGifBtn").disabled = false;
+    document.getElementById("recordBoomerangBtn").disabled = false;
+  } catch (err) {
+    console.error("Failed to load GIF worker:", err);
+  }
+}
+
+// ==============================
+// INDEXED DB
+// ==============================
+const DB_NAME = "PhotoBruhDB", DB_VERSION = 1, STORE_NAME = "photos";
+let dbPromise = null;
+
+function initDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
+        store.createIndex("createdAt", "createdAt", { unique: false });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  return dbPromise;
+}
+
+async function addPhotoToDB(blob, type = "photo", posterCanvas = null) {
+  const db = await initDB();
+  let thumbnailBlob = null;
+  try {
+    if (type === "video" || type === "gif") {
+      if (posterCanvas) thumbnailBlob = await new Promise(r => posterCanvas.toBlob(r, "image/jpeg", 0.7));
+    } else {
+      const img = await createImageBitmap(blob);
+      const tc = document.createElement("canvas");
+      const max = 200;
+      let w = img.width, h = img.height;
+      if (w > h) { if (w > max) { h = h * (max / w); w = max; } }
+      else { if (h > max) { w = w * (max / h); h = max; } }
+      tc.width = w; tc.height = h;
+      tc.getContext("2d").drawImage(img, 0, 0, w, h);
+      thumbnailBlob = await new Promise(r => tc.toBlob(r, "image/jpeg", 0.7));
+    }
+  } catch (e) { console.warn("Thumbnail error:", e); }
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.add({ blob, type, thumbnail: thumbnailBlob, createdAt: Date.now() });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = (event) => {
+      if (request.error?.name === "QuotaExceededError") alert("Storage full! Please delete some photos.");
+      reject(request.error);
+    };
   });
 }
 
-// =========================
-// DRAW FACE FILTER (not animated)
-// =========================
-function drawFaceFilter(context, detection, videoElement, transform, filterType, useSmoothing = true) {
+async function getAllPhotosFromDB(filter = {}) {
+  const db = await initDB();
+  const tx = db.transaction(STORE_NAME, "readonly");
+  const store = tx.objectStore(STORE_NAME);
+  const request = store.getAll();
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => {
+      let results = request.result;
+      if (filter.type) results = results.filter(item => item.type === filter.type);
+      if (filter.sort === "oldest") results.sort((a, b) => a.createdAt - b.createdAt);
+      else results.sort((a, b) => b.createdAt - a.createdAt);
+      resolve(results);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function deletePhotoFromDB(id) {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).delete(id).onsuccess = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function countPhotosInDB() {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const request = tx.objectStore(STORE_NAME).count();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function migrateLocalStorageToIndexedDB() {
+  const old = JSON.parse(localStorage.getItem("savedCanvasImage")) || {};
+  const values = Object.values(old);
+  for (const dataURL of values) {
+    const res = await fetch(dataURL);
+    await addPhotoToDB(await res.blob(), "photo");
+  }
+  if (values.length) localStorage.removeItem("savedCanvasImage");
+}
+
+// ==============================
+// HELPER FUNCTIONS
+// ==============================
+function lerp(a, b, t) { return a * (1 - t) + b * t; }
+function getAveragePoint(points) {
+  let x = 0, y = 0;
+  for (const p of points) { x += p.x; y += p.y; }
+  return { x: x / points.length, y: y / points.length };
+}
+
+// ==============================
+// FACE FILTER DRAWING (MediaPipe)
+// ==============================
+function drawFaceFilterMediaPipe(ctx, face, transform, filterType, useSmoothing = true) {
   const assets = faceFilterAssets[filterType];
   if (!assets) return;
 
-  const earsImg = assets.ears;
-  const noseImg = assets.nose;
-  if (!detection) return;
+  const landmarks = face.landmarks;
+  const toCanvas = (lm) => ({ x: lm.x * ctx.canvas.width, y: lm.y * ctx.canvas.height });
 
-  const canvas = context.canvas;
-  const landmarks = detection.landmarks.positions;
+  const leftEyeOuter  = toCanvas(landmarks[33]);
+  const rightEyeOuter = toCanvas(landmarks[263]);
+  const noseTip       = toCanvas(landmarks[1]);
+  const leftBrow      = toCanvas(landmarks[105]);
+  const rightBrow     = toCanvas(landmarks[334]);
 
-  // Stable anchor points
-  const leftEye = mapLandmarkToCanvas(
-    getAveragePoint(landmarks.slice(36, 42)),
-    videoElement,
-    canvas
-  );
+  const eyeCenterX = (leftEyeOuter.x + rightEyeOuter.x) / 2;
+  const eyeCenterY = (leftEyeOuter.y + rightEyeOuter.y) / 2;
+  const dx = rightEyeOuter.x - leftEyeOuter.x;
+  const dy = rightEyeOuter.y - leftEyeOuter.y;
+  const angle = Math.atan2(dy, dx);
+  const eyeDist = Math.sqrt(dx * dx + dy * dy);
+  const EYE_DIST_DIVISOR = 150;
+  const baseScale = eyeDist / EYE_DIST_DIVISOR;
 
-  const rightEye = mapLandmarkToCanvas(
-    getAveragePoint(landmarks.slice(42, 48)),
-    videoElement,
-    canvas
-  );
+  const finalX = useSmoothing ? (transform.x = lerp(transform.x, eyeCenterX, 1 - FILTER_SMOOTHING)) : eyeCenterX;
+  const finalY = useSmoothing ? (transform.y = lerp(transform.y, eyeCenterY, 1 - FILTER_SMOOTHING)) : eyeCenterY;
+  const finalAngle = useSmoothing ? (transform.angle = lerp(transform.angle, angle, 1 - ANGLE_SMOOTHING)) : angle;
+  const finalScale = useSmoothing ? (transform.scale = lerp(transform.scale, baseScale, 1 - FILTER_SMOOTHING)) : baseScale;
 
-  const nose = mapLandmarkToCanvas(
-    landmarks[30], // nose tip
-    videoElement,
-    canvas
-  );
-
-  const leftBrow = mapLandmarkToCanvas(
-    getAveragePoint(landmarks.slice(17, 22)),
-    videoElement,
-    canvas
-  );
-
-  const rightBrow = mapLandmarkToCanvas(
-    getAveragePoint(landmarks.slice(22, 27)),
-    videoElement,
-    canvas
-  );
-
-  const jawLeft = mapLandmarkToCanvas(landmarks[0], videoElement, canvas);
-  const jawRight = mapLandmarkToCanvas(landmarks[16], videoElement, canvas);
-
-  // Face geometry
-  const eyeCenterX = (leftEye.x + rightEye.x) / 2;
-  const eyeCenterY = (leftEye.y + rightEye.y) / 2;
-
-  const browCenterX = (leftBrow.x + rightBrow.x) / 2;
-  const browCenterY = (leftBrow.y + rightBrow.y) / 2;
-
-  const dx = rightEye.x - leftEye.x;
-  const dy = rightEye.y - leftEye.y;
-
-  let angle = Math.atan2(dy, dx);
-
-  const faceWidth = Math.abs(jawRight.x - jawLeft.x);
-
-  // restore original proportional scaling
-  let scale = faceWidth / 200;
-
-  // Smooth full transform
-  const finalX = useSmoothing
-    ? (transform.x = lerp(transform.x, eyeCenterX, 1 - FILTER_SMOOTHING))
-    : eyeCenterX;
-
-  const finalY = useSmoothing
-    ? (transform.y = lerp(transform.y, eyeCenterY, 1 - FILTER_SMOOTHING))
-    : eyeCenterY;
-
-  const finalAngle = useSmoothing
-    ? (transform.angle = lerp(transform.angle, angle, 1 - FILTER_SMOOTHING))
-    : angle;
-
-  const finalScale = useSmoothing
-    ? (transform.scale = lerp(transform.scale, scale, 1 - FILTER_SMOOTHING))
-    : scale;
-
-
-  // ===== EARS =====
-  context.save();
-  context.translate(finalX, finalY);
-  context.rotate(finalAngle);
-
-  let earsWidth = 260 * finalScale;
-  let earsHeight = 180 * finalScale;
-  if (filterType == 'minion') {
-    earsWidth = 216 * finalScale
-    earsHeight = 270 * finalScale
-  } else if (filterType == 'rabbid') {
-    earsWidth = 300 * finalScale
-    earsHeight = 300 * finalScale
-  }  else if (filterType == 'shrek') {
-    earsWidth = 240 * finalScale
-    earsHeight = 200 * finalScale
+  // --- GLASSES ---
+  if (filterType === 'glasses') {
+    const gw = 220 * finalScale, gh = gw * 0.4;
+    ctx.save(); ctx.translate(finalX, finalY); ctx.rotate(finalAngle);
+    ctx.drawImage(assets.ears, -gw/2, -gh/2, gw, gh);
+    ctx.restore();
+    return;
   }
 
-// place ears relative to eyebrow line instead of hardcoded lift
-  const browOffsetY = browCenterY - eyeCenterY;
+  // --- EARS ---
+  if (assets.ears && filterType !== 'mustache' && filterType !== 'lorax' && filterType !== 'woah') {
+    let ew = 280 * finalScale, eh = 200 * finalScale;
+    if (filterType === 'minion') { ew = 216 * finalScale; eh = 270 * finalScale; }
+    else if (filterType === 'rabbid') { ew = 300 * finalScale; eh = 300 * finalScale; }
+    else if (filterType === 'shrek')  { ew = 240 * finalScale; eh = 200 * finalScale; }
 
-  // one clean vertical offset for ears
-  let earsY = browOffsetY - (195 * finalScale);
-  if (filterType == 'minion') {
-    earsY = browOffsetY - (195 * finalScale) + (100 * finalScale);
-  } else if (filterType == 'rabbid') {
-    earsY = browOffsetY - (195 * finalScale) - (120 * finalScale);
-  } else if (filterType == 'shrek') {
-    earsY = browOffsetY - (195 * finalScale) - (50 * finalScale);
+    const browCenterY = (leftBrow.y + rightBrow.y) / 2;
+    const browOffsetY = browCenterY - eyeCenterY;
+    let earsY = browOffsetY - (195 * finalScale);
+    if (filterType === 'minion') earsY += 100 * finalScale;
+    else if (filterType === 'rabbid') earsY -= 120 * finalScale;
+    else if (filterType === 'shrek')  earsY -= 50 * finalScale;
+
+    ctx.save(); ctx.translate(finalX, finalY); ctx.rotate(finalAngle);
+    ctx.drawImage(assets.ears, -ew/2, earsY, ew, eh);
+    ctx.restore();
   }
 
-  if (filterType != 'mustache' && filterType != 'lorax' && filterType != 'woah') {
-    context.drawImage(
-      earsImg,
-      -earsWidth / 2,
-      earsY,
-      earsWidth,
-      earsHeight
-    );
+  // --- NOSE ---
+  if (assets.nose && filterType !== 'minion' && filterType !== 'shrek') {
+    const rawDx = noseTip.x - eyeCenterX;
+    const rawDy = noseTip.y - eyeCenterY;
+    const cosA = Math.cos(-finalAngle), sinA = Math.sin(-finalAngle);
+    const localX = rawDx * cosA - rawDy * sinA;
+    const localY = rawDx * sinA + rawDy * cosA;
+
+    if (!transform.noseLocalX) transform.noseLocalX = 0;
+    if (!transform.noseLocalY) transform.noseLocalY = 0;
+    const noseOffX = useSmoothing ? (transform.noseLocalX = lerp(transform.noseLocalX, localX, 1 - FILTER_SMOOTHING)) : localX;
+    let noseOffY = useSmoothing ? (transform.noseLocalY = lerp(transform.noseLocalY, localY, 1 - FILTER_SMOOTHING)) : localY;
+
+    const yOff = { dog: 0, cat: 20, mustache: 35, rabbid: 60, lorax: -10 };
+    noseOffY += (yOff[filterType] || 0) * finalScale;
+
+    let nw, nh;
+    if (filterType === 'dog') { nw = 90 * finalScale; nh = 65 * finalScale; }
+    else if (filterType === 'cat') { nw = 210 * finalScale; nh = 120 * finalScale; }
+    else if (filterType === 'mustache') { nw = 200 * finalScale; nh = 65 * finalScale; }
+    else if (filterType === 'rabbid') { nw = 200 * finalScale; nh = 200 * finalScale; }
+    else if (filterType === 'lorax') { nw = 410 * finalScale; nh = 410 * finalScale; }
+    else if (filterType === 'woah') { nw = 300 * finalScale; nh = 300 * finalScale; }
+    else { nw = 90 * finalScale; nh = 65 * finalScale; }
+
+    ctx.save(); ctx.translate(finalX, finalY); ctx.rotate(finalAngle);
+    ctx.drawImage(assets.nose, noseOffX - nw/2, noseOffY - nh/2, nw, nh);
+    ctx.restore();
   }
-
-
-  context.restore();
-
-  // ===== NOSE =====
-  context.save();
-  context.translate(finalX, finalY);
-  context.rotate(finalAngle);
-
-  // nose offset relative to face center (LOCAL face space)
-  const rawNoseOffsetX = nose.x - eyeCenterX;
-  const rawNoseOffsetY = nose.y - eyeCenterY;
-
-  const noseOffsetX = useSmoothing
-    ? (transform.noseOffsetX = lerp(transform.noseOffsetX, rawNoseOffsetX, 1 - FILTER_SMOOTHING))
-    : rawNoseOffsetX;
-
-  let noseOffsetY = useSmoothing
-    ? (transform.noseOffsetY = lerp(transform.noseOffsetY, rawNoseOffsetY, 1 - FILTER_SMOOTHING))
-    : rawNoseOffsetY;
-
-  const filterNoseYOffset = {
-    dog: 0,
-    cat: 20,
-    mustache: 35,
-    rabbid: 60,
-    lorax: -10,
-    minion: 0
-  };
-
-  noseOffsetY += (filterNoseYOffset[filterType] || 0) * finalScale;
-
-  let noseWidth;
-  if (filterType == 'dog') {
-    noseWidth = 90 * finalScale;
-  } else if (filterType == 'cat') {
-    noseWidth = 210 * finalScale;
-  } else if (filterType == 'mustache') {
-    noseWidth = 200 * finalScale;
-  } else if (filterType == 'rabbid') {
-    noseWidth = 200 * finalScale;
-  } else if (filterType == 'lorax') {
-    noseWidth = 410 * finalScale;
-  } else if (filterType == 'woah') {
-    noseWidth = 300 * finalScale;
-  } else {
-    noseWidth = 90 * finalScale;
-  }
-
-
-  let noseHeight;
-  if (filterType == 'dog' || filterType == 'mustache') {
-    noseHeight = 65 * finalScale;
-  } else if (filterType == 'cat') {
-    noseHeight = 120 * finalScale;
-  } else if (filterType == 'rabbid') {
-    noseHeight = 200 * finalScale;
-  } else if (filterType == 'lorax') {
-    noseHeight = 410 * finalScale;
-  } else if (filterType == 'woah') {
-    noseHeight = 300 * finalScale;
-  } else {
-    noseHeight = 65 * finalScale;
-  }
-
-  if (filterType != 'minion' && filterType != 'shrek') {
-    context.drawImage(
-      noseImg,
-      noseOffsetX - noseWidth / 2,
-      noseOffsetY - noseHeight / 2,
-      noseWidth,
-      noseHeight
-    );
-  }
-
-  context.restore();
 }
 
-function getVideoDisplayRect() {
-  const rect = cameraFeed.getBoundingClientRect();
-
-  return {
-    width: rect.width,
-    height: rect.height,
-    left: rect.left,
-    top: rect.top
-  };
-}
-
-// =========================
-// ADD ANIMATION EFFECTS
-// =========================
-
+// ==============================
+// ANIMATED FILTERS
+// ==============================
 function drawScanlines(ctx) {
   ctx.save();
   ctx.globalAlpha = 0.15;
@@ -1830,100 +1229,166 @@ function drawMatrix(ctx) {
   ctx.restore();
 }
 
-// =========================
-// TAKE PHOTO
-// =========================
-function takePhoto() {
-  if (cameraFeed.videoWidth === 0 || cameraFeed.videoHeight === 0) {
-    console.error("Video not ready yet");
-    soundManager.play("error");
-    return;
+function drawAnimatedFilter(ctx) {
+  switch (activeAnimatedFilter) {
+    case "scanlines": drawScanlines(ctx); break;
+    case "sparkles": drawSparkles(ctx); break;
+    case "snow": drawSnow(ctx); break;
+    case "hearts": drawHearts(ctx); break;
+    case "matrix": drawMatrix(ctx); break;
+  }
+}
+
+function resetAnimatedFilterState() {
+  animatedParticles.length = 0;
+
+  if (activeAnimatedFilter === "sparkles") {
+    for (let i = 0; i < 40; i++) {
+      animatedParticles.push({
+        x: Math.random() * overlayCanvas.width,
+        y: Math.random() * overlayCanvas.height,
+        size: Math.random() * 4 + 1,
+        speed: Math.random() * 0.8 + 0.2,
+        alpha: Math.random()
+      });
+    }
   }
 
-  const context = canvas.getContext("2d", {
-    willReadFrequently: true
-  });
+  if (activeAnimatedFilter === "snow") {
+    for (let i = 0; i < 60; i++) {
+      animatedParticles.push({
+        x: Math.random() * overlayCanvas.width,
+        y: Math.random() * overlayCanvas.height,
+        size: Math.random() * 5 + 2,
+        speed: Math.random() * 1.5 + 0.5
+      });
+    }
+  }
 
-  const outputWidth  = glCanvas.width;   // 1280
-  const outputHeight = glCanvas.height;  // 720
-  canvas.width  = outputWidth;
-  canvas.height = outputHeight;
+  if (activeAnimatedFilter === "hearts") {
+    for (let i = 0; i < 25; i++) {
+      animatedParticles.push({
+        x: Math.random() * overlayCanvas.width,
+        y: overlayCanvas.height + Math.random() * 300,
+        size: Math.random() * 18 + 12,
+        speed: Math.random() * 1.2 + 0.5,
+        drift: (Math.random() - 0.5) * 1.2
+      });
+    }
+  }
 
+  if (activeAnimatedFilter === "matrix") {
+    for (let i = 0; i < 40; i++) {
+      animatedParticles.push({
+        x: i * 32,
+        y: Math.random() * -800,
+        speed: Math.random() * 4 + 3
+      });
+    }
+  }
+}
+
+// ==============================
+// OVERLAY RENDER LOOP
+// ==============================
+function renderOverlayLoop() {
+  overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+  const now = performance.now();
+  const faceLostTooLong = now - lastFaceTime > FACE_HOLD_DURATION;
+  let facesToDraw = [];
+  if (currentFaceData && currentFaceData.faces.length > 0) {
+    facesToDraw = currentFaceData.faces;
+  } else if (!faceLostTooLong && lastValidFaceData) {
+    facesToDraw = lastValidFaceData.faces;
+  }
+
+  // Sync transforms
+  while (dogTransforms.length < facesToDraw.length) {
+    dogTransforms.push({ x:0, y:0, angle:0, scale:1, noseLocalX:0, noseLocalY:0 });
+  }
+  dogTransforms.length = facesToDraw.length;
+
+  // Draw face filters
+  if (activeFaceFilter && facesToDraw.length > 0) {
+    overlayCtx.save();
+    facesToDraw.forEach((face, i) => {
+      drawFaceFilterMediaPipe(overlayCtx, face, dogTransforms[i], activeFaceFilter, true);
+    });
+    overlayCtx.restore();
+  }
+
+  // Animated overlays
+  if (activeAnimatedFilter) {
+    overlayCtx.save();
+    drawAnimatedFilter(overlayCtx);
+    overlayCtx.restore();
+  }
+
+  animationFrameCount++;
+  requestAnimationFrame(renderOverlayLoop);
+}
+
+// ==============================
+// TAKE PHOTO
+// ==============================
+function takePhoto() {
+  if (cameraFeed.videoWidth === 0 || cameraFeed.videoHeight === 0) {
+    soundManager.play("error"); return;
+  }
+
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const outputWidth = glCanvas.width, outputHeight = glCanvas.height;
+  canvas.width = outputWidth; canvas.height = outputHeight;
   context.clearRect(0, 0, outputWidth, outputHeight);
   context.save();
 
-  if (effectsManager.hasActiveEffects()) {
-    context.filter = effectsManager.buildFilterString();
-  }
-
+  if (effectsManager.hasActiveEffects()) context.filter = effectsManager.buildFilterString();
   soundManager.play("shutter");
-
   context.drawImage(glCanvas, 0, 0);
 
-  // Mirror the filter layer to match the mirrored base image
-  if (mirrored) {
-      context.save();
-      context.translate(outputWidth, 0);
-      context.scale(-1, 1);
+  // Use snapshot
+  const facesToDraw = snapshotFaces || [];
+  const transformsToUse = snapshotTransforms || [];
+
+  if (mirrored) { context.save(); context.translate(outputWidth, 0); context.scale(-1, 1); }
+
+  if (activeFaceFilter && facesToDraw.length > 0) {
+    facesToDraw.forEach((face, i) => {
+      const t = transformsToUse[i] || { x:0, y:0, angle:0, scale:1, noseLocalX:0, noseLocalY:0 };
+      drawFaceFilterMediaPipe(context, face, t, activeFaceFilter, false);
+    });
   }
 
-  if (activeFaceFilter && trackedFaces.length) {
-      trackedFaces.forEach((face, i) => {
-          drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
-      });
+  if (activeAnimatedFilter && ["sparkles","snow","hearts","matrix"].includes(activeAnimatedFilter)) {
+    drawAnimatedFilter(context);
   }
 
-  if (
-      activeAnimatedFilter &&
-      ["sparkles", "snow", "hearts", "matrix"].includes(activeAnimatedFilter)
-  ) {
-      drawAnimatedFilter(context);
-  }
-
-  if (mirrored) {
-      context.restore();
-  }
-
+  if (mirrored) context.restore();
   context.restore();
 
   canvas.toBlob(async (blob) => {
     if (!blob) return;
-
     const objectURL = URL.createObjectURL(blob);
-    console.log("Blob size:", blob.size);   // should be > 0
-
     originalCapturedPhoto = objectURL;
-
     photo.src = objectURL;
     photo.style.display = "block";
     photo.style.opacity = "1";
-
     photo.onclick = () => {
       photo.classList.add("fade-out");
-      // remove after transition
-      photo.addEventListener("transitionend", handleFadeEnd, { once: true });
+      photo.addEventListener("transitionend", handleFadeEnd(), { once: true });
     };
-
-    const testImg = new Image();
-    testImg.onload = () => {
-      console.log("Captured size:", testImg.naturalWidth, testImg.naturalHeight);
-    };
-    testImg.src = objectURL;
-
     await addPhotoToDB(blob, "photo");
-
     await displayTakenPhotos();
     await updatePhotoCounter();
 
     editorBaseImage = new Image();
     editorBaseImage.onload = () => {
-      console.log("Editor base image loaded");
       resizeEditorCanvas(editorBaseImage);
       editorCanvas.style.display = "block";
-      editorObjects  = [];
+      editorObjects = [];
       redrawEditorCanvas();
-    }; 
-    editorBaseImage.onerror = () => console.error("Failed to load editor base image");
+    };
     editorBaseImage.src = objectURL;
   }, "image/webp", 0.95);
 
@@ -1931,53 +1396,6 @@ function takePhoto() {
     photo.classList.add("fade-out");
     photo.addEventListener("transitionend", handleFadeEnd(), { once: true });
   }, 2000);
-
-}
-
-function downloadImage(dataURL, filename) {
-  const link = document.createElement("a");
-  link.href = dataURL;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-}
-
-function downloadOriginalPhoto() {
-  if (!originalCapturedPhoto) {
-    alert("No photo available to download.");
-    soundManager.play("error");
-    return;
-  }
-
-  downloadImage(originalCapturedPhoto, "photobruh-original.png");
-  soundManager.play("success");
-}
-
-function downloadEditedPhoto() {
-  if (!editorBaseImage) {
-    alert("No edited photo available to download.");
-    soundManager.play("error");
-    return;
-  }
-
-  const editedDataURL = editorCanvas.toDataURL("image/png");
-  downloadImage(editedDataURL, "photobruh-edited.png");
-  soundManager.play("success");
-}
-
-if (document.getElementById("downloadOriginalBtn")) {
-  document.getElementById("downloadOriginalBtn").addEventListener("click", () => {
-    soundManager.play("click");
-    downloadOriginalPhoto();
-  });
-}
-
-if (document.getElementById("downloadEditedBtn")) {
-  document.getElementById("downloadEditedBtn").addEventListener("click", () => {
-    soundManager.play("click");
-    downloadEditedPhoto();
-  });
 }
 
 function handleFadeEnd() {
@@ -1986,21 +1404,9 @@ function handleFadeEnd() {
   photo.style.opacity = "1";
 }
 
-// =========================
-// PHOTO COUNTER
-// =========================
-
-async function updatePhotoCounter() {
-  const total = await countPhotosInDB();
-  const counter = document.getElementById("photoCounter");
-  counter.textContent = `Photos Taken: ${total}`;
-
-  updateStorageInfo()
-}
-
-// =========================
+// ==============================
 // GALLERY
-// =========================
+// ==============================
 async function displayTakenPhotos(photosArray = null) {
   const photos = photosArray || await getAllPhotosFromDB();
 
@@ -2032,8 +1438,7 @@ async function displayTakenPhotos(photosArray = null) {
     img.classList.add("saved-photo");
 
     img.addEventListener("click", () => {
-      // When clicked, show full image in modal
-      openPhotoModal(URL.createObjectURL(entry.blob));
+      openPhotoModal(URL.createObjectURL(entry.blob), entry.type);
     });
 
     const deleteBtn = document.createElement("button");
@@ -2057,60 +1462,303 @@ async function displayTakenPhotos(photosArray = null) {
   });
 }
 
-// =========================
-// MODAL
-// =========================
-function openPhotoModal(imageSrc) {
-  const modal = document.getElementById("photoModal");
-  const modalImg = document.getElementById("modalImage");
+async function updatePhotoCounter() {
+  const total = await countPhotosInDB();
+  const counter = document.getElementById("photoCounter");
+  counter.textContent = `Photos Taken: ${total}`;
 
-  modalImg.src = imageSrc;
+  updateStorageInfo()
+}
+
+function openPhotoModal(src, type = 'photo') {
+  const modal = document.getElementById("photoModal");
+  const container = document.getElementById("modalContent");
+  if (!container) return;
+
+  // Clear previous content
+  container.innerHTML = '';
+
+  let element;
+  if (type === 'video') {
+    element = document.createElement('video');
+    element.src = src;
+    element.controls = true;
+    element.autoplay = true;
+    element.loop = true;
+  } else {
+    // photo, gif, strip – all can be shown as images
+    element = document.createElement('img');
+    element.src = src;
+    element.alt = 'Expanded photo';
+  }
+
+  // Common styling
+  element.style.maxWidth = '100%';
+  element.style.maxHeight = '90vh';
+  element.style.borderRadius = '12px';
+  element.style.objectFit = 'contain';
+  element.style.cursor = 'default';
+  element.addEventListener('click', (e) => e.stopPropagation());
+
+  container.appendChild(element);
   modal.style.display = "flex";
 
+  // Move focus to close button for accessibility
   const closeBtn = modal.querySelector(".close-modal");
   if (closeBtn) closeBtn.focus();
 }
 
 function closePhotoModal() {
   const modal = document.getElementById("photoModal");
-  const modalImg = document.getElementById("modalImage");
-
+  const container = document.getElementById("modalContent");
+  if (container) container.innerHTML = '';
   modal.style.display = "none";
-  modalImg.src = "";
 }
 
-if (document.getElementById("modalImage")){
-  document.getElementById("modalImage").addEventListener("click", (e) => {
-    e.stopPropagation();
-  });
+// ==============================
+// COMPOSITE & RECORDING
+// ==============================
+function compositeFrame() {
+  if (!recordCtx) return;
+  recordCtx.clearRect(0, 0, recordCanvas.width, recordCanvas.height);
+  recordCtx.drawImage(glCanvas, 0, 0);
+  if (mirrored) {
+    recordCtx.save(); recordCtx.translate(recordCanvas.width, 0); recordCtx.scale(-1, 1);
+  }
+  recordCtx.drawImage(overlayCanvas, 0, 0);
+  if (mirrored) recordCtx.restore();
 }
 
+// ==============================
+// VIDEO RECORDING
+// ==============================
+function startVideoRecording() {
+  compositeFrame();                          // initial frame
+  const stream = recordCanvas.captureStream(30);
+  recordedChunks = [];
 
-// =========================
-// THEME TOGGLE
-// =========================
-const themeBtn = document.getElementById("themeBtn");
+  const mimeType = MediaRecorder.isTypeSupported('video/webm; codecs=vp9')
+    ? 'video/webm; codecs=vp9'
+    : 'video/webm';
+  mediaRecorder = new MediaRecorder(stream, { mimeType });
 
-const themes = ["win95", "amber", "matrix", "vaporwave"];
-let currentTheme = 0;
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) recordedChunks.push(e.data);
+  };
 
-themeBtn.addEventListener("click", () => {
-    currentTheme = (currentTheme + 1) % themes.length;
-    const nextTheme = themes[currentTheme];
+  mediaRecorder.onstop = async () => {
+    const blob = new Blob(recordedChunks, { type: mimeType });
+    await addPhotoToDB(blob, "video", recordCanvas);
+    await displayTakenPhotos();
+    await updatePhotoCounter();
+    stream.getTracks().forEach(track => track.stop());
+    isRecording = false;
+    document.getElementById("recordingStatus").style.display = "none";
+    cancelAnimationFrame(recordingRAF);
+  };
 
-    if (nextTheme === "win95") {
-        document.body.removeAttribute("data-theme");
-        themeBtn.textContent = "Theme: Win95";
-    } else {
-        document.body.setAttribute("data-theme", nextTheme);
-        themeBtn.textContent = `Theme: ${nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1)}`;
+  const updateFrameLoop = () => {
+    if (!isRecording) return;
+    compositeFrame();
+    recordingRAF = requestAnimationFrame(updateFrameLoop);
+  };
+  recordingRAF = requestAnimationFrame(updateFrameLoop);
+
+  mediaRecorder.start();
+  isRecording = true;
+  document.getElementById("recordingStatus").style.display = "inline";
+  soundManager.play("shutter");
+
+  setTimeout(() => {
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+      mediaRecorder.stop();
     }
-});
+  }, 5000);
+}
 
+function stopVideoRecording() {
+  if (mediaRecorder && mediaRecorder.state === "recording") {
+    mediaRecorder.stop();
+  }
+}
 
-// =========================
-// INIT
-// =========================
+// ==============================
+// GIF RECORDING
+// ==============================
+async function recordGIF() {
+  if (!gifWorkerBlobURL) {
+    alert("GIF worker not ready yet.");
+    return;
+  }
+
+  const status = document.getElementById("recordingStatus");
+  const gif = new GIF({
+    workers: 2,
+    quality: 10,
+    width: recordCanvas.width,
+    height: recordCanvas.height,
+    workerScript: gifWorkerBlobURL
+  });
+
+  const fps = 10;
+  const duration = 3000;
+  const frameCount = (fps * duration) / 1000;
+  const frameInterval = 1000 / fps;
+
+  soundManager.play("shutter");
+  status.textContent = "🔴 Capturing frames...";
+  status.style.display = "inline";
+
+  for (let i = 0; i < frameCount; i++) {
+    compositeFrame();
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = recordCanvas.width;
+    tempCanvas.height = recordCanvas.height;
+    tempCanvas.getContext("2d").drawImage(recordCanvas, 0, 0);
+    gif.addFrame(tempCanvas, { delay: frameInterval });
+    await new Promise(resolve => setTimeout(resolve, frameInterval));
+  }
+
+  const posterCanvas = document.createElement("canvas");
+  posterCanvas.width = recordCanvas.width;
+  posterCanvas.height = recordCanvas.height;
+  posterCanvas.getContext("2d").drawImage(recordCanvas, 0, 0);
+
+  status.textContent = "⏳ Processing GIF...";
+
+  gif.on('finished', async (blob) => {
+    await addPhotoToDB(blob, "gif", posterCanvas);
+    await displayTakenPhotos();
+    await updatePhotoCounter();
+    status.style.display = "none";
+    soundManager.play("success");
+  });
+
+  gif.render();
+}
+
+// ==============================
+// BOOMERANG RECORDING
+// ==============================
+async function recordBoomerang() {
+  if (!gifWorkerBlobURL) {
+    alert("GIF worker not ready yet.");
+    return;
+  }
+
+  const status = document.getElementById("recordingStatus");
+  const fps = 15;
+  const recordDuration = 1500;
+  const frameInterval = 1000 / fps;
+  const totalFrames = Math.floor((fps * recordDuration) / 1000);
+
+  soundManager.play("shutter");
+  status.textContent = "🔴 Capturing boomerang...";
+  status.style.display = "inline";
+
+  const forwardFrames = [];
+
+  for (let i = 0; i < totalFrames; i++) {
+    compositeFrame();
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = recordCanvas.width;
+    tempCanvas.height = recordCanvas.height;
+    tempCanvas.getContext("2d").drawImage(recordCanvas, 0, 0);
+    forwardFrames.push(tempCanvas);
+    await new Promise(resolve => setTimeout(resolve, frameInterval));
+  }
+
+  const posterCanvas = document.createElement("canvas");
+  posterCanvas.width = recordCanvas.width;
+  posterCanvas.height = recordCanvas.height;
+  posterCanvas.getContext("2d").drawImage(recordCanvas, 0, 0);
+
+  status.textContent = "⏳ Processing boomerang...";
+
+  const gif = new GIF({
+    workers: 2,
+    quality: 10,
+    width: recordCanvas.width,
+    height: recordCanvas.height,
+    workerScript: gifWorkerBlobURL
+  });
+
+  forwardFrames.forEach(canvas => gif.addFrame(canvas, { delay: frameInterval }));
+  for (let i = forwardFrames.length - 2; i >= 0; i--) {
+    gif.addFrame(forwardFrames[i], { delay: frameInterval });
+  }
+
+  gif.on('finished', async (blob) => {
+    await addPhotoToDB(blob, "gif", posterCanvas);
+    await displayTakenPhotos();
+    await updatePhotoCounter();
+    status.style.display = "none";
+    soundManager.play("success");
+  });
+
+  gif.render();
+}
+
+// ==============================
+// MIRROR / SYNC
+// ==============================
+function syncOverlayMirror() {
+  overlayCanvas.style.transform = mirrored ? "scaleX(-1)" : "scaleX(1)";
+}
+function syncOverlaySize() {
+  const rect = glCanvas.getBoundingClientRect();
+  overlayCanvas.width = rect.width;
+  overlayCanvas.height = rect.height;
+}
+
+// ==============================
+// MAIN INITIALIZATION
+// ==============================
+(async () => {
+  initWebGL();
+  await initMediaPipe();
+  await loadGifWorker();
+  await startCamera("user");
+  await new Promise((resolve) => {
+    if (cameraFeed.readyState >= 2) resolve();
+    else cameraFeed.addEventListener("loadeddata", resolve, { once: true });
+  });
+
+  faceModelsLoaded = true;
+  renderWebGL();
+  renderOverlayLoop();
+
+  function mediaPipeLoop() {
+    const now = performance.now();
+    if (mediaPipeReady && cameraFeed.readyState >= 2 && now - lastMediaPipeSend >= MEDIAPIPE_INTERVAL) {
+      sendFrameToMediaPipe();
+      lastMediaPipeSend = now;
+    }
+    requestAnimationFrame(mediaPipeLoop);
+  }
+  mediaPipeLoop();
+
+  updateBootLine("boot1", "Initializing Camera...", true);
+  updateBootLine("boot2", "Loading Face Tracker...", true);
+  updateBootLine("boot3", "Loading Filters...", true);
+  setTimeout(() => {
+    updateBootLine("boot4", "Starting PhotoBruh...", true);
+    setTimeout(hideLoadingScreen, 500);
+  }, 300);
+})();
+
+// Safety timeout
+setTimeout(() => {
+  const loading = document.getElementById("loadingScreen");
+  if (loading && loading.style.display !== "none") {
+    hideLoadingScreen();
+    cameraErrorOverlay.style.display = "flex";
+  }
+}, 15000);
+
+// ==============================
+// EVENT LISTENERS
+// ==============================
 document.addEventListener("DOMContentLoaded", async () => {
   await initDB();
   await migrateLocalStorageToIndexedDB();
@@ -2119,82 +1767,198 @@ document.addEventListener("DOMContentLoaded", async () => {
   syncOverlayMirror();
 });
 
-setTimeout(() => {
-  const loading = document.getElementById("loadingScreen");
-  if (loading && loading.style.display !== "none") {
-    console.warn("Forcing loading screen hide after 15 seconds.");
-    hideLoadingScreen();
-    cameraErrorOverlay.style.display = "flex"; // assume camera might have failed
-  }
-}, 15000);
+// Mirror button
+mirrorer.addEventListener('click', () => {
+  soundManager.play("click");
+  mirrored = !mirrored;
+  syncOverlayMirror();
+});
 
+// Switch camera
+const switchCameraBtn = document.getElementById("switchCameraBtn");
+switchCameraBtn.addEventListener("click", async () => {
+  soundManager.play("click");
+  await startCamera(currentFacingMode === "user" ? "environment" : "user");
+});
+
+// Snap button
+if (snap) {
+  snap.addEventListener('click', () => {
+    soundManager.play("click"); soundManager.play("tick");
+    isBooth = false;
+
+    // Snapshot current face data
+    let facesToUse = null;
+    if (currentFaceData && currentFaceData.faces.length > 0) facesToUse = currentFaceData.faces;
+    else if (lastValidFaceData) facesToUse = lastValidFaceData.faces;
+    snapshotFaces = facesToUse ? facesToUse.slice() : [];
+    snapshotTransforms = dogTransforms.map(t => ({ ...t }));
+
+    let timeLeft = 3;
+    countdown.style.display = "flex";
+    countdown.textContent = timeLeft;
+    snap.disabled = true;
+    const timer = setInterval(() => {
+      timeLeft--;
+      if (timeLeft > 0) { countdown.textContent = timeLeft; }
+      else {
+        clearInterval(timer);
+        countdown.style.display = "none";
+        takePhoto();
+        snap.disabled = false;
+      }
+    }, 1000);
+  });
+}
+
+// Face filter buttons
+document.querySelectorAll(".face-filter-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    activeFaceFilter = btn.dataset.filter === "none" ? null : btn.dataset.filter;
+  });
+});
+
+// Animated filter buttons
+document.querySelectorAll(".animated-filter-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    activeAnimatedFilter = btn.dataset.anim === "none" ? null : btn.dataset.anim;
+    resetAnimatedFilterState();
+  });
+});
+
+// Face warp buttons
+document.querySelectorAll(".face-warp-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    faceWarpMode = parseInt(btn.dataset.mode);
+    faceWarpEnabled = true;
+    document.getElementById("faceWarpToggleBtn").textContent = "Face Warp: On";
+  });
+});
+document.getElementById("faceWarpToggleBtn").addEventListener("click", () => {
+  faceWarpEnabled = !faceWarpEnabled;
+  document.getElementById("faceWarpToggleBtn").textContent = "Face Warp: " + (faceWarpEnabled ? "On" : "Off");
+  if (!faceWarpEnabled) faceWarpMode = 0;
+});
+
+// Effects panel toggle
+if (effects) {
+  effects.addEventListener('click', () => {
+    soundManager.play("click");
+    const el = document.getElementById('effectsList');
+    el.style.display = el.style.display === 'block' ? 'none' : 'block';
+  });
+}
+
+// Gallery controls
 document.getElementById("deleteSelectedBtn").addEventListener("click", async () => {
-  const checkboxes = document.querySelectorAll(".photo-checkbox:checked");
-  if (!checkboxes.length) return alert("No photos selected.");
-  if (!confirm(`Delete ${checkboxes.length} photo(s)?`)) return;
+  const cbs = document.querySelectorAll(".photo-checkbox:checked");
+  if (!cbs.length) return alert("No photos selected.");
+  if (!confirm(`Delete ${cbs.length} photo(s)?`)) return;
   soundManager.play("delete");
-  for (const cb of checkboxes) {
-    const id = Number(cb.dataset.id);
-    await deletePhotoFromDB(id);
-  }
-  await displayTakenPhotos();
-  await updatePhotoCounter();
+  for (const cb of cbs) await deletePhotoFromDB(Number(cb.dataset.id));
+  await displayTakenPhotos(); await updatePhotoCounter();
 });
 
 document.getElementById("clearAllBtn").addEventListener("click", async () => {
-  if (!confirm("Delete ALL photos? This cannot be undone!")) return;
+  if (!confirm("Delete ALL photos?")) return;
   soundManager.play("delete");
   const photos = await getAllPhotosFromDB();
-  for (const p of photos) {
-    await deletePhotoFromDB(p.id);
-  }
-  await displayTakenPhotos();
-  await updatePhotoCounter();
+  for (const p of photos) await deletePhotoFromDB(p.id);
+  await displayTakenPhotos(); await updatePhotoCounter();
 });
 
 document.getElementById("sortSelect").addEventListener("change", async (e) => {
-  const value = e.target.value;
+  const v = e.target.value;
   let filter = {};
-  if (value === "oldest") filter.sort = "oldest";
-  else if (value === "photos") filter.type = "photo";
-  else if (value === "strips") filter.type = "strip";
-  // else newest (default)
-  const photos = await getAllPhotosFromDB(filter);
-  // Directly re-render without re-fetching (to avoid double DB call)
-  // We'll adapt displayTakenPhotos to accept an array instead
-  await displayTakenPhotos(photos);
+  if (v === "oldest") filter.sort = "oldest";
+  else if (v === "photos") filter.type = "photo";
+  else if (v === "strips") filter.type = "strip";
+  await displayTakenPhotos(await getAllPhotosFromDB(filter));
 });
 
 document.getElementById("exportZipBtn").addEventListener("click", async () => {
   soundManager.play("click");
   const photos = await getAllPhotosFromDB();
   if (!photos.length) return alert("No photos to export.");
-  
   const zip = new JSZip();
   const folder = zip.folder("photobruh-photos");
-
-  for (let i = 0; i < photos.length; i++) {
-    const entry = photos[i];
+  photos.forEach((entry, i) => {
     const ext = entry.type === "strip" ? "png" : "webp";
-    folder.file(`photo_${i+1}_${Date.now()}.${ext}`, entry.blob);
-  }
-
+    folder.file(`photo_${i+1}.${ext}`, entry.blob);
+  });
   const content = await zip.generateAsync({ type: "blob" });
-  const url = URL.createObjectURL(content);
   const a = document.createElement("a");
-  a.href = url;
+  a.href = URL.createObjectURL(content);
   a.download = "photobruh-photos.zip";
   a.click();
-  URL.revokeObjectURL(url);
   soundManager.play("success");
 });
 
-const crtBtn = document.getElementById("toggleCRT");
-crtBtn.addEventListener("click", () => {
+// Theme / UI toggles
+document.getElementById("themeBtn").addEventListener("click", () => {
+  currentTheme = (currentTheme + 1) % themes.length;
+  const nextTheme = themes[currentTheme];
+
+  if (nextTheme === "win95") {
+      document.body.removeAttribute("data-theme");
+      themeBtn.textContent = "Theme: Win95";
+  } else {
+      document.body.setAttribute("data-theme", nextTheme);
+      themeBtn.textContent = `Theme: ${nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1)}`;
+  }
+});
+
+document.getElementById("toggleCRT").addEventListener("click", () => {
   document.body.classList.toggle("no-crt");
   crtBtn.textContent = document.body.classList.contains("no-crt") ? "CRT Effect: Off" : "CRT Effect: On";
 });
 
+document.getElementById("contrastBtn").addEventListener("click", () => {
+  document.body.classList.toggle("high-contrast");
+  const isHC = document.body.classList.contains("high-contrast");
+  contrastBtn.textContent = isHC ? "High Contrast: On" : "High Contrast: Off";
+});
+
+document.getElementById("muteBtn").addEventListener("click", () => {
+  soundManager.toggle();
+  muteBtn.textContent = soundManager.enabled ? "Sound: On" : "Sound: Off";
+});
+
+// Download buttons
+document.getElementById("downloadOriginalBtn").addEventListener("click", () => {
+  soundManager.play("click");
+  if (!originalCapturedPhoto) return alert("No photo available.");
+  const a = document.createElement("a");
+  a.href = originalCapturedPhoto; a.download = "photobruh-original.png";
+  a.click();
+});
+document.getElementById("downloadEditedBtn").addEventListener("click", () => {
+  soundManager.play("click");
+  if (!editorBaseImage) return alert("No edited photo available.");
+  const a = document.createElement("a");
+  a.href = editorCanvas.toDataURL("image/png");
+  a.download = "photobruh-edited.png";
+  a.click();
+});
+
+// Video / GIF / Boomerang buttons
+recordVideoBtn.addEventListener("click", () => {
+  if (isRecording) return;
+  soundManager.play("click");
+  startVideoRecording();
+});
+
+recordGifBtn.addEventListener("click", () => {
+  soundManager.play("click");
+  recordGIF();
+});
+
+recordBoomerangBtn.addEventListener("click", () => {
+  soundManager.play("click");
+  recordBoomerang();
+});
+
+// Storage info
 async function updateStorageInfo() {
   if (!navigator.storage || !navigator.storage.estimate) {
     document.getElementById("storageInfo").textContent = "Storage info not available.";
@@ -2207,23 +1971,7 @@ async function updateStorageInfo() {
     `Storage: ${usedMB} MB used of ${quotaMB} MB`;
 }
 
-const contrastBtn = document.getElementById("contrastBtn");
-contrastBtn.addEventListener("click", () => {
-  document.body.classList.toggle("high-contrast");
-  const isHC = document.body.classList.contains("high-contrast");
-  contrastBtn.textContent = isHC ? "High Contrast: On" : "High Contrast: Off";
-});
-
-function syncOverlaySize() {
-  const rect = glCanvas.getBoundingClientRect();
-  overlayCanvas.width  = rect.width;
-  overlayCanvas.height = rect.height;
-}
-
-function syncOverlayMirror() {
-  overlayCanvas.style.transform = mirrored ? "scaleX(-1)" : "scaleX(1)";
-}
-
+// Resize listeners
 window.addEventListener("resize", syncOverlaySize);
 window.addEventListener("orientationchange", syncOverlaySize);
 cameraFeed.addEventListener("loadedmetadata", syncOverlaySize);

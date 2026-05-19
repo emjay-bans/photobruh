@@ -130,19 +130,33 @@ function capturePhotoToDataURL() {
   // 1. Draw the main WebGL canvas (which already has crop + visual effects)
   context.drawImage(glCanvas, 0, 0);
 
-  // 2. Add mirrored overlays manually (face filters, animations)
+  // 2. Grab live face data (no snapshot needed for strip – it captures instantly)
+  let facesToDraw = [];
+  if (currentFaceData && currentFaceData.faces.length > 0) {
+    facesToDraw = currentFaceData.faces;
+  } else if (lastValidFaceData) {
+    facesToDraw = lastValidFaceData.faces;
+  }
+
+  // Use the current smoothed transforms
+  const transformsToUse = dogTransforms.slice();
+
+  // Mirror if needed
   if (mirrored) {
     context.save();
     context.translate(width, 0);
     context.scale(-1, 1);
   }
 
-  if (activeFaceFilter && trackedFaces.length) {
-    trackedFaces.forEach((face, i) => {
-      drawFaceFilter(context, face, cameraFeed, dogTransforms[i], activeFaceFilter, false);
+  // Draw face filters (including glasses, dog, etc.)
+  if (activeFaceFilter && facesToDraw.length > 0) {
+    facesToDraw.forEach((face, i) => {
+      const t = transformsToUse[i] || { x:0, y:0, angle:0, scale:1, noseLocalX:0, noseLocalY:0 };
+      drawFaceFilterMediaPipe(context, face, t, activeFaceFilter, false);
     });
   }
 
+  // Draw animated overlays (hearts, snow, etc.)
   if (
     activeAnimatedFilter &&
     ["sparkles", "snow", "hearts", "matrix"].includes(activeAnimatedFilter)
