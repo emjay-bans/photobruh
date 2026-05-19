@@ -529,3 +529,10 @@ body.high-contrast button {
 #photo {
   cursor: pointer;
 }
+
+body.no-crt .pixel::before {
+  display: none;
+}
+body.no-crt::after {
+  display: none;
+}

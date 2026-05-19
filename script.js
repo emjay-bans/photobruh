@@ -2189,6 +2189,12 @@ document.getElementById("exportZipBtn").addEventListener("click", async () => {
   soundManager.play("success");
 });
 
+const crtBtn = document.getElementById("toggleCRT");
+crtBtn.addEventListener("click", () => {
+  document.body.classList.toggle("no-crt");
+  crtBtn.textContent = document.body.classList.contains("no-crt") ? "CRT Effect: Off" : "CRT Effect: On";
+});
+
 async function updateStorageInfo() {
   if (!navigator.storage || !navigator.storage.estimate) {
     document.getElementById("storageInfo").textContent = "Storage info not available.";
