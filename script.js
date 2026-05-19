@@ -72,10 +72,6 @@ let dogTransforms       = [];
 const FILTER_SMOOTHING  = 0.65;
 const ANGLE_SMOOTHING   = 0.9;
 
-// Snapshots for photo capture
-let snapshotFaces       = null;
-let snapshotTransforms  = [];
-
 // Animated particles
 let animationFrameCount = 0;
 const animatedParticles = [];
@@ -861,6 +857,26 @@ const filterSlots = {
   glasses:  ['glasses']
 };
 
+// ========================
+// OVERLAY ASSETS
+// ========================
+
+// Image overlay presets
+const overlayImages = {
+  grain: new Image(),
+  lightleak: new Image(),
+  warmtint: new Image(),
+  riodejaneiro: new Image()
+};
+overlayImages.grain.src = "public/assets/overlays/grain.webp";           // a tiling noise texture
+overlayImages.lightleak.src = "public/assets/overlays/lightleak.jpg";   // a soft orange gradient
+overlayImages.warmtint.src = "public/assets/overlays/warmtint.jpg";     // a semi‑transparent warm colour overlay
+overlayImages.riodejaneiro.src = "public/assets/overlays/riodejaneiro.webp"
+
+let activeOverlayType = null;          // 'grain', 'lightleak', 'warmtint', or 'custom'
+let customOverlayImage = null;         // user‑uploaded image
+let overlayOpacity = 0.5;             // default 50%
+
 // ==============================
 // CAMERA
 // ==============================
@@ -1332,7 +1348,7 @@ function renderOverlayFrame() {
 
   overlayDirty = false;   // we are about to draw, mark clean
 
-  overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height, mirrored);
 
   const faceLostTooLong = now - lastFaceTime > FACE_HOLD_DURATION;
   let facesToDraw = [];
@@ -1367,6 +1383,23 @@ function renderOverlayFrame() {
   }
 
   animationFrameCount++;
+
+  // Draw image overlay on top
+  if (activeOverlayType) {
+    let overlayImg = null;
+    if (activeOverlayType === 'custom' && customOverlayImage) {
+      overlayImg = customOverlayImage;
+    } else {
+      overlayImg = overlayImages[activeOverlayType];
+    }
+    if (overlayImg && overlayImg.complete) {
+      overlayCtx.save();
+      overlayCtx.globalAlpha = overlayOpacity;
+      // Scale the overlay to cover the whole canvas
+      overlayCtx.drawImage(overlayImg, 0, 0, overlayCanvas.width, overlayCanvas.height);
+      overlayCtx.restore();
+    }
+  }
 }
 
 // ==============================
@@ -1391,9 +1424,23 @@ function takePhoto() {
     context.filter = effectsManager.buildFilterString();  // applied to subsequent draws
   }
 
-  // Use snapshot
-  const facesToDraw = snapshotFaces || [];
-  const transformsToUse = snapshotTransforms || [];
+  // ---- Use the same live face data and transforms as the overlay ----
+  const now = performance.now();
+  const faceLostTooLong = now - lastFaceTime > FACE_HOLD_DURATION;
+  let facesToDraw = [];
+  if (currentFaceData && currentFaceData.faces.length > 0) {
+    facesToDraw = currentFaceData.faces;
+  } else if (!faceLostTooLong && lastValidFaceData) {
+    facesToDraw = lastValidFaceData.faces;
+  }
+
+  while (dogTransforms.length < facesToDraw.length) {
+    dogTransforms.push({ x:0, y:0, angle:0, scale:1, noseLocalX:0, noseLocalY:0 });
+  }
+  dogTransforms.length = facesToDraw.length;
+
+  // use the current smoothed transforms (no need to copy)
+  const transformsToUse = dogTransforms;
 
   if (mirrored) { context.save(); context.translate(outputWidth, 0); context.scale(-1, 1); }
 
@@ -1410,7 +1457,10 @@ function takePhoto() {
     drawAnimatedFilter(context);
   }
 
+  drawImageOverlay(context, outputWidth, outputHeight, false);
+
   if (mirrored) context.restore();
+
   context.restore();
 
   canvas.toBlob(async (blob) => {
@@ -1571,32 +1621,19 @@ function compositeFrame() {
 
   recordCtx.clearRect(0, 0, recordCanvas.width, recordCanvas.height);
 
-  // 1. Draw the WebGL canvas (already has visual effects via shader)
+  // 1. Draw the WebGL canvas (mirror handled by its shader)
   recordCtx.drawImage(glCanvas, 0, 0);
 
-  // 2. Handle mirroring
-  if (mirrored) {
-    recordCtx.save();
-    recordCtx.translate(recordCanvas.width, 0);
-    recordCtx.scale(-1, 1);
-  }
-
-  // 3. Apply current visual effects to the overlay layer
+  // 2. Apply CSS visual effects to the overlay layer
   if (effectsManager.hasActiveEffects()) {
     recordCtx.filter = effectsManager.buildFilterString();
-  } else {
-    recordCtx.filter = 'none';
   }
 
-  // 4. Draw the overlay canvas (face filters, animations)
+  // 3. Draw the overlay canvas AS-IS (it already contains mirrored content)
   recordCtx.drawImage(overlayCanvas, 0, 0);
 
-  // 5. Reset filter to avoid affecting future operations
+  // 4. Reset filter
   recordCtx.filter = 'none';
-
-  if (mirrored) {
-    recordCtx.restore();
-  }
 }
 
 // ==============================
@@ -1795,6 +1832,30 @@ async function recordBoomerang() {
 }
 
 // ==============================
+// IMAGE OVERLAY HELPER
+// ==============================
+
+function drawImageOverlay(ctx, width, height, mirrored = false) {
+  if (!activeOverlayType) return;
+  let img = null;
+  if (activeOverlayType === 'custom' && customOverlayImage) {
+    img = customOverlayImage;
+  } else {
+    img = overlayImages[activeOverlayType];
+  }
+  if (img && img.complete) {
+    ctx.save();
+    if (mirrored) {
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.globalAlpha = overlayOpacity;
+    ctx.drawImage(img, 0, 0, width, height);
+    ctx.restore();
+  }
+}
+
+// ==============================
 // MIRROR / SYNC
 // ==============================
 function syncOverlayMirror() {
@@ -1905,13 +1966,6 @@ if (snap) {
   snap.addEventListener('click', () => {
     soundManager.play("click"); soundManager.play("tick");
     isBooth = false;
-
-    // Snapshot current face data
-    let facesToUse = null;
-    if (currentFaceData && currentFaceData.faces.length > 0) facesToUse = currentFaceData.faces;
-    else if (lastValidFaceData) facesToUse = lastValidFaceData.faces;
-    snapshotFaces = facesToUse ? facesToUse.slice() : [];
-    snapshotTransforms = dogTransforms.map(t => ({ ...t }));
 
     let timeLeft = 3;
     countdown.style.display = "flex";
@@ -2106,6 +2160,42 @@ recordGifBtn.addEventListener("click", () => {
 recordBoomerangBtn.addEventListener("click", () => {
   soundManager.play("click");
   recordBoomerang();
+});
+
+// Overlay preset buttons
+document.querySelectorAll(".overlay-preset-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const type = btn.dataset.overlay;
+    activeOverlayType = type === "none" ? null : type;
+    if (type !== "custom") customOverlayImage = null;
+    overlayDirty = true;
+  });
+});
+
+// Custom overlay file upload
+document.getElementById("customOverlayBtn").addEventListener("click", () => {
+  document.getElementById("customOverlayFile").click();
+});
+document.getElementById("customOverlayFile").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const img = new Image();
+    img.onload = () => {
+      customOverlayImage = img;
+      activeOverlayType = 'custom';
+      overlayDirty = true;
+    };
+    img.src = event.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+// Opacity slider
+document.getElementById("overlayOpacitySlider").addEventListener("input", (e) => {
+  overlayOpacity = e.target.value / 100;
+  overlayDirty = true;
 });
 
 // Storage info

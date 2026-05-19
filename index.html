@@ -120,6 +120,20 @@
                 0<input type="range" id="saturSlider" min="0" max="200" value="100" step="1">200
                 <label>Sepia</label>
                 0<input type="range" id="sepiaSlider" min="0" max="100" value="0" step="1">100
+
+                <p></p>
+                <h3 style="margin-bottom: 0px; margin-top: 5px;">Image Overlay</h3>
+                <div id="presetButtons" style="margin-bottom: 20px;">
+                    <button class="overlay-preset-btn" data-overlay="none">None</button>
+                    <button class="overlay-preset-btn" data-overlay="grain">Film Grain</button>
+                    <button class="overlay-preset-btn" data-overlay="lightleak">Light Leak</button>
+                    <button class="overlay-preset-btn" data-overlay="warmtint">Warm Tint</button>
+                    <button class="overlay-preset-btn" data-overlay="riodejaneiro">Rio de Janeiro</button>
+                    <input type="file" id="customOverlayFile" accept="image/*" style="display:none;">
+                    <button id="customOverlayBtn">📁 Custom Image</button>
+                </div>
+                <label>Overlay Opacity</label>
+                0<input type="range" id="overlayOpacitySlider" min="0" max="100" value="50" step="1">100
             </div>
         </div>
         <br>

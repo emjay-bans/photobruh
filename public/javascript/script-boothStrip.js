@@ -166,6 +166,8 @@ function capturePhotoToDataURL() {
     drawAnimatedFilter(context);
   }
 
+  drawImageOverlay(context, outputWidth, outputHeight, false);
+
   if (mirrored) {
     context.restore();
   }
