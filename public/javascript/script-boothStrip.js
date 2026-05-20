@@ -142,31 +142,43 @@ function capturePhotoToDataURL() {
   const transformsToUse = dogTransforms.slice();
 
   // Mirror if needed
-  if (mirrored) {
+    if (mirrored) {
     context.save();
     context.translate(width, 0);
     context.scale(-1, 1);
   }
 
-  // Draw face filters (including glasses, dog, etc.)
-  if (activeFaceFilters.length > 0 && facesToDraw.length > 0) {
-    facesToDraw.forEach((face, i) => {
-      const t = transformsToUse[i] || { x:0,y:0,angle:0,scale:1,noseLocalX:0,noseLocalY:0 };
-      activeFaceFilters.forEach(filterType => {
-        drawFaceFilterMediaPipe(context, face, t, filterType, false);
+  if (distortionMode === 4) {
+    if (effectsManager.hasActiveEffects()) {
+      context.filter = effectsManager.buildFilterString();
+    }
+    context.drawImage(overlayCanvas, 0, 0, width, height);
+    context.filter = 'none';
+  } else {
+    // Normal mode: draw filters manually
+    let facesToDraw = [];
+    if (currentFaceData && currentFaceData.faces.length > 0) {
+      facesToDraw = currentFaceData.faces;
+    } else if (lastValidFaceData) {
+      facesToDraw = lastValidFaceData.faces;
+    }
+    const transformsToUse = dogTransforms;
+
+    if (activeFaceFilters.length > 0 && facesToDraw.length > 0) {
+      facesToDraw.forEach((face, i) => {
+        const t = transformsToUse[i] || { x:0,y:0,angle:0,scale:1,noseLocalX:0,noseLocalY:0 };
+        activeFaceFilters.forEach(filterType => {
+          drawFaceFilterMediaPipe(context, face, t, filterType, false);
+        });
       });
-    });
-  }
+    }
 
-  // Draw animated overlays (hearts, snow, etc.)
-  if (
-    activeAnimatedFilter &&
-    ["sparkles", "snow", "hearts", "matrix"].includes(activeAnimatedFilter)
-  ) {
-    drawAnimatedFilter(context);
-  }
+    if (activeAnimatedFilter && ["sparkles","snow","hearts","matrix"].includes(activeAnimatedFilter)) {
+      drawAnimatedFilter(context);
+    }
 
-  drawImageOverlay(context, outputWidth, outputHeight, false);
+    drawImageOverlay(context, width, height, false);
+  }
 
   if (mirrored) {
     context.restore();

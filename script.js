@@ -1549,24 +1549,48 @@ function takePhoto() {
   // use the current smoothed transforms (no need to copy)
   const transformsToUse = dogTransforms;
 
-  if (mirrored) { context.save(); context.translate(outputWidth, 0); context.scale(-1, 1); }
+    // Mirror if needed
+  if (mirrored) {
+    context.save();
+    context.translate(outputWidth, 0);
+    context.scale(-1, 1);
+  }
 
-  if (activeFaceFilters.length > 0 && facesToDraw.length > 0) {
-    facesToDraw.forEach((face, i) => {
-      const t = transformsToUse[i] || { x:0,y:0,angle:0,scale:1,noseLocalX:0,noseLocalY:0 };
-      activeFaceFilters.forEach(filterType => {
-        drawFaceFilterMediaPipe(context, face, t, filterType, false);
+  if (distortionMode === 4) {
+    // Fraud mode active: overlay canvas already contains the squished + pixelated filters
+    // Draw it directly (it already has the image overlay and all effects)
+    if (effectsManager.hasActiveEffects()) {
+      context.filter = effectsManager.buildFilterString();
+    }
+    context.drawImage(overlayCanvas, 0, 0, outputWidth, outputHeight);
+    context.filter = 'none';
+  } else {
+    // Normal mode: draw filters manually
+    const facesToDraw = (currentFaceData && currentFaceData.faces.length > 0)
+      ? currentFaceData.faces
+      : (lastValidFaceData ? lastValidFaceData.faces : []);
+    const transformsToUse = dogTransforms;
+
+    if (activeFaceFilters.length > 0 && facesToDraw.length > 0) {
+      facesToDraw.forEach((face, i) => {
+        const t = transformsToUse[i] || { x:0,y:0,angle:0,scale:1,noseLocalX:0,noseLocalY:0 };
+        activeFaceFilters.forEach(filterType => {
+          drawFaceFilterMediaPipe(context, face, t, filterType, false);
+        });
       });
-    });
+    }
+
+    if (activeAnimatedFilter && ["sparkles","snow","hearts","matrix"].includes(activeAnimatedFilter)) {
+      drawAnimatedFilter(context);
+    }
+
+    // Image overlay
+    drawImageOverlay(context, outputWidth, outputHeight, false);
   }
 
-  if (activeAnimatedFilter && ["sparkles","snow","hearts","matrix"].includes(activeAnimatedFilter)) {
-    drawAnimatedFilter(context);
+  if (mirrored) {
+    context.restore();
   }
-
-  drawImageOverlay(context, outputWidth, outputHeight, false);
-
-  if (mirrored) context.restore();
 
   context.restore();
 
