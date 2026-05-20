@@ -90,7 +90,8 @@
                     <button onclick="distortionMode = 1; distortionStrength = 0.3;">Bulge</button>
                     <button onclick="distortionMode = 2; distortionStrength = 0.5;">Swirl</button>
                     <button onclick="distortionMode = 3; distortionStrength = 0.4;">Pinch</button>
-                    <button onclick="distortionMode = 0;">None</button>
+                    <button onclick="distortionMode = 4; distortionStrength = 0.05;">Fraud</button>
+                    <button onclick="distortionMode = 0;">None</button> <p></p>
                     <label>Distortion Strength</label>
                     <input type="range" id="distortStrengthSlider" min="0" max="200" value="30" step="1"
                         oninput="distortionStrength = this.value / 100;">
@@ -228,6 +229,7 @@
             <button id="downloadEditedBtn"><h3>Download Edited</h3></button>
         </div>
         
+        <canvas id="mediapipeInput" width="320" height="240" style="display:none;"></canvas>
     </body>
     
     <script defer src="script.js"></script>

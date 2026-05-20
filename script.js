@@ -44,6 +44,9 @@ const recordVideoBtn = document.getElementById("recordVideoBtn");
 const recordGifBtn = document.getElementById("recordGifBtn");
 const recordBoomerangBtn = document.getElementById("recordBoomerangBtn");
 
+const mpInputCanvas = document.getElementById("mediapipeInput");
+const mpInputCtx = mpInputCanvas.getContext("2d", { willReadFrequently: true });
+
 // ==============================
 // GLOBAL STATE
 // ==============================
@@ -64,7 +67,6 @@ let currentFaceData     = null;
 let lastValidFaceData   = null;
 let lastFaceTime        = 0;
 let lastMediaPipeSend   = 0;
-const MEDIAPIPE_INTERVAL = 100;
 const FACE_HOLD_DURATION = 500;
 
 // Transforms & smoothing
@@ -104,6 +106,9 @@ let overlayDirty = true;   // start dirty so first frame draws
 let lastOverlayFrame = 0;
 const OVERLAY_INTERVAL = 13;
 
+const MEDIAPIPE_INTERVAL = 150;   // ~6.7 fps – perfectly smooth with your smoothing values
+
+
 // ==============================
 // WEBCANVAS / OVERLAY CANVAS
 // ==============================
@@ -129,6 +134,12 @@ recordCanvas.width  = glCanvas.width;
 recordCanvas.height = glCanvas.height;
 const recordCtx = recordCanvas.getContext("2d", { willReadFrequently: true });
 let recordingRAF = null;
+
+// Helper canvas for fraud‑filter squishing
+const squishCanvas = document.createElement("canvas");
+squishCanvas.width  = overlayCanvas.width;
+squishCanvas.height = overlayCanvas.height;
+const squishCtx = squishCanvas.getContext("2d");
 
 // ==============================
 // WEBCANVAS UNIFORM LOCATIONS
@@ -306,6 +317,28 @@ const fragmentShaderSource = `
           float dist = length(delta);
           float factor = dist * uDistortStrength * 0.4;
           st = uv - delta * factor;
+      }
+      // ---- Fraud filter: squished left + squished & pixelated right ----
+      else if (uDistortMode == 4) {
+          float split = 0.75;                // position of the split
+          float leftSquish = 0.01;            // how much the left part is squished (0 = full width, 1 = invisible)
+          float rightSquish = 0.01;          // how much the right part is squished
+
+          if (uv.x < split) {
+              // Left portion: map UV so that the full frame fits in [0, split]
+              float localX = uv.x / split;   // normalise to 0..1 inside the left area
+              st.x = localX * (1.0 - leftSquish) + leftSquish * 0.5;
+              st.y = uv.y;
+          } else {
+              // Right portion: full frame squished into the remaining width
+              float localX = (uv.x - split) / (1.0 - split);  // 0..1 inside the right strip
+              st.x = localX * (1.0 - rightSquish) + rightSquish * 0.5;
+              st.y = uv.y;
+
+              // Pixelation
+              float gridSize = max(0.005, uDistortStrength * 0.2);
+              st = floor(st / gridSize) * gridSize;
+          }
       }
 
       // --- Face‑specific warps (applied on top of global) ---
@@ -533,6 +566,32 @@ function getAnimatedFilterMode() {
     case "scanlines": return 1;
     default: return 0;
   }
+}
+
+function pixelateRegion(ctx, x, y, w, h, blockSize) {
+  if (blockSize <= 1) return;
+  const imageData = ctx.getImageData(x, y, w, h);
+  const data = imageData.data;
+  for (let by = 0; by < h; by += blockSize) {
+    for (let bx = 0; bx < w; bx += blockSize) {
+      let r = 0, g = 0, b = 0, a = 0, count = 0;
+      for (let py = 0; py < blockSize && by + py < h; py++) {
+        for (let px = 0; px < blockSize && bx + px < w; px++) {
+          const idx = ((by + py) * w + (bx + px)) * 4;
+          r += data[idx]; g += data[idx+1]; b += data[idx+2]; a += data[idx+3];
+          count++;
+        }
+      }
+      r = Math.round(r / count); g = Math.round(g / count); b = Math.round(b / count); a = Math.round(a / count);
+      for (let py = 0; py < blockSize && by + py < h; py++) {
+        for (let px = 0; px < blockSize && bx + px < w; px++) {
+          const idx = ((by + py) * w + (bx + px)) * 4;
+          data[idx] = r; data[idx+1] = g; data[idx+2] = b; data[idx+3] = a;
+        }
+      }
+    }
+  }
+  ctx.putImageData(imageData, x, y);
 }
 
 // ==============================
@@ -903,7 +962,7 @@ async function startCamera(facingMode = currentFacingMode) {
   try {
     if (currentStream) currentStream.getTracks().forEach(t => t.stop());
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: facingMode }, width: { ideal: 480 }, height: { ideal: 270 } }
+      video: { facingMode: { ideal: facingMode }, width: { ideal: 1080 }, height: { ideal: 607.5 } }
     });
     currentStream = stream;
     currentFacingMode = facingMode;
@@ -955,7 +1014,12 @@ async function initMediaPipe() {
 
 function sendFrameToMediaPipe() {
   if (!mediaPipeReady || !faceMesh || cameraFeed.readyState < 2) return;
-  faceMesh.send({ image: cameraFeed });
+
+  // Downscale the camera frame to a tiny canvas (320×240)
+  mpInputCtx.drawImage(cameraFeed, 0, 0, mpInputCanvas.width, mpInputCanvas.height);
+
+  // Send the downscaled image to MediaPipe
+  faceMesh.send({ image: mpInputCanvas });
 }
 
 // ==============================
@@ -1334,18 +1398,15 @@ function resetAnimatedFilterState() {
 function renderOverlayFrame() {
   const now = performance.now();
 
-  // if (now - lastOverlayFrame < OVERLAY_INTERVAL) {
-  //   requestAnimationFrame(renderOverlayFrame);
-  //   return;
-  // }
+  if (now - lastOverlayFrame < OVERLAY_INTERVAL) {
+    return;
+  }
   lastOverlayFrame = now;
 
   // If no filters are active and nothing has changed, skip
-  // if (!activeAnimatedFilter && activeFaceFilters.length === 0 && !overlayDirty) {
-  //   requestAnimationFrame(renderOverlayFrame);
-  //   return;
-  // }
-
+  if (!activeAnimatedFilter && activeFaceFilters.length === 0 && !overlayDirty) {
+    return;
+  }
   overlayDirty = false;   // we are about to draw, mark clean
 
   overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height, mirrored);
@@ -1380,6 +1441,52 @@ function renderOverlayFrame() {
     overlayCtx.save();
     drawAnimatedFilter(overlayCtx);
     overlayCtx.restore();
+  }
+
+  if (distortionMode === 4) {
+    const now = performance.now();
+
+    const split = 0.75;
+    const rightX   = Math.floor(overlayCanvas.width * split);
+    const rightW   = overlayCanvas.width - rightX;
+    const rightH   = overlayCanvas.height;
+    const leftW    = rightX;
+    const leftH    = overlayCanvas.height;
+
+    // Copy full overlay to temp
+    squishCtx.clearRect(0, 0, squishCanvas.width, squishCanvas.height);
+    squishCtx.drawImage(overlayCanvas, 0, 0);
+
+    // Clear entire overlay
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    // Draw left region: full overlay squished horizontally by 30%
+    overlayCtx.save();
+    overlayCtx.beginPath();
+    overlayCtx.rect(0, 0, leftW, leftH);
+    overlayCtx.clip();
+    overlayCtx.drawImage(
+      squishCanvas,
+      0, 0, squishCanvas.width, squishCanvas.height,
+      0, 0, leftW, leftH
+    );
+    overlayCtx.restore();
+
+    // Draw right region: full overlay squished by 95% then pixelated
+    overlayCtx.save();
+    overlayCtx.beginPath();
+    overlayCtx.rect(rightX, 0, rightW, rightH);
+    overlayCtx.clip();
+    overlayCtx.drawImage(
+      squishCanvas,
+      0, 0, squishCanvas.width, squishCanvas.height,
+      rightX, 0, rightW, rightH
+    );
+    overlayCtx.restore();
+
+    // Pixelate the right region
+    const blockSize = Math.max(1, Math.round(distortionStrength * 0.2 * rightW));
+    pixelateRegion(overlayCtx, rightX, 0, rightW, rightH, blockSize);
   }
 
   animationFrameCount++;
